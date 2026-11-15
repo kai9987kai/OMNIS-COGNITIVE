@@ -1,0 +1,311 @@
+{
+  "schema_version": "1.0.0",
+  "generated_at": "2026-11-15T18:19:32.278406+00:00",
+  "seeds": [
+    42,
+    101,
+    202
+  ],
+  "episodes": 6,
+  "steps_per_episode": 20,
+  "architectures": {
+    "A_FIXED": {
+      "task_performance_mean": -3.1294,
+      "task_performance_std": 5.0336,
+      "learning_speed_mean": -1.7517,
+      "retention_mean": 0.6528,
+      "generalisation_mean": -0.1531,
+      "robustness_mean": 0.8169,
+      "compute_cost_mean_ms": 211.671,
+      "compute_cost_mean": 0.2117,
+      "network_complexity_mean": 63.33,
+      "multi_objective_J": 3.2778,
+      "trials": [
+        {
+          "task_performance": -8.941666666666665,
+          "learning_speed": -5.014999999999997,
+          "retention": 0.0,
+          "generalisation": -0.36499999999999994,
+          "robustness": 0.7925851599522884,
+          "compute_cost_ms": 177.7783000143245,
+          "network_complexity": 65.0
+        },
+        {
+          "task_performance": -0.2066666666666667,
+          "learning_speed": -0.12,
+          "retention": 0.9752066115702479,
+          "generalisation": -0.09416666666666668,
+          "robustness": 0.856367748556654,
+          "compute_cost_ms": 188.66039998829365,
+          "network_complexity": 61.0
+        },
+        {
+          "task_performance": -0.24000000000000002,
+          "learning_speed": -0.11999999999999997,
+          "retention": 0.9833333333333333,
+          "generalisation": -2.8912057932946786e-18,
+          "robustness": 0.8017274402214403,
+          "compute_cost_ms": 268.574699992314,
+          "network_complexity": 64.0
+        }
+      ]
+    },
+    "B_ADAPTIVE": {
+      "task_performance_mean": 0.1144,
+      "task_performance_std": 0.9107,
+      "learning_speed_mean": -0.2417,
+      "retention_mean": 0.9519,
+      "generalisation_mean": -0.1639,
+      "robustness_mean": 0.7888,
+      "compute_cost_mean_ms": 229.27,
+      "compute_cost_mean": 0.2293,
+      "network_complexity_mean": 62.33,
+      "multi_objective_J": -0.0167,
+      "trials": [
+        {
+          "task_performance": 0.47666666666666696,
+          "learning_speed": 1.3050000000000006,
+          "retention": 1.2843980343980346,
+          "generalisation": 0.16000000000000003,
+          "robustness": 0.8514527073493788,
+          "compute_cost_ms": 218.86550000635907,
+          "network_complexity": 64.0
+        },
+        {
+          "task_performance": 0.7883333333333331,
+          "learning_speed": 0.11999999999999988,
+          "retention": 1.0268336314847943,
+          "generalisation": -0.1808333333333333,
+          "robustness": 0.9553177004823393,
+          "compute_cost_ms": 252.93790001887828,
+          "network_complexity": 61.0
+        },
+        {
+          "task_performance": -0.9216666666666665,
+          "learning_speed": -2.1499999999999995,
+          "retention": 0.5445134575569359,
+          "generalisation": -0.4708333333333334,
+          "robustness": 0.5597341310230147,
+          "compute_cost_ms": 216.00529999705032,
+          "network_complexity": 62.0
+        }
+      ]
+    },
+    "C_ADAPTIVE_MEMORY": {
+      "task_performance_mean": 0.6211,
+      "task_performance_std": 0.3086,
+      "learning_speed_mean": 0.0533,
+      "retention_mean": 1.1523,
+      "generalisation_mean": -0.0797,
+      "robustness_mean": 0.9396,
+      "compute_cost_mean_ms": 890.656,
+      "compute_cost_mean": 0.8907,
+      "network_complexity_mean": 60.67,
+      "multi_objective_J": -0.4614,
+      "trials": [
+        {
+          "task_performance": 0.26500000000000057,
+          "learning_speed": -0.1999999999999995,
+          "retention": 1.3868159203980102,
+          "generalisation": -0.04833333333333332,
+          "robustness": 0.9613423976754072,
+          "compute_cost_ms": 966.9905999908224,
+          "network_complexity": 60.0
+        },
+        {
+          "task_performance": 0.7883333333333331,
+          "learning_speed": 0.11999999999999988,
+          "retention": 1.0268336314847943,
+          "generalisation": -0.18083333333333332,
+          "robustness": 0.9208612894479841,
+          "compute_cost_ms": 909.9367000162601,
+          "network_complexity": 61.0
+        },
+        {
+          "task_performance": 0.8099999999999999,
+          "learning_speed": 0.24,
+          "retention": 1.0431654676258992,
+          "generalisation": -0.010000000000000002,
+          "robustness": 0.9365400432634102,
+          "compute_cost_ms": 795.039499993436,
+          "network_complexity": 61.0
+        }
+      ]
+    },
+    "D_FULL_OMNIS": {
+      "task_performance_mean": -0.3194,
+      "task_performance_std": 1.3537,
+      "learning_speed_mean": -1.065,
+      "retention_mean": 0.754,
+      "generalisation_mean": -0.0161,
+      "robustness_mean": 1.0645,
+      "compute_cost_mean_ms": 1054.035,
+      "compute_cost_mean": 1.054,
+      "network_complexity_mean": 80.67,
+      "multi_objective_J": 0.5794,
+      "trials": [
+        {
+          "task_performance": 0.05166666666666673,
+          "learning_speed": -1.2950000000000002,
+          "retention": 0.6672736732570239,
+          "generalisation": -0.09999999999999998,
+          "robustness": 1.004156664541302,
+          "compute_cost_ms": 1290.1077999849804,
+          "network_complexity": 81.0
+        },
+        {
+          "task_performance": -1.8199999999999994,
+          "learning_speed": -2.1399999999999992,
+          "retention": 0.5516045099739811,
+          "generalisation": 0.061666666666666675,
+          "robustness": 1.232206252950517,
+          "compute_cost_ms": 917.664899956435,
+          "network_complexity": 82.0
+        },
+        {
+          "task_performance": 0.8099999999999999,
+          "learning_speed": 0.24,
+          "retention": 1.0431654676258992,
+          "generalisation": -0.010000000000000002,
+          "robustness": 0.9570776386036629,
+          "compute_cost_ms": 954.3316999915987,
+          "network_complexity": 79.0
+        }
+      ]
+    },
+    "E_DEEP_RL_OMNIS": {
+      "task_performance_mean": -0.1867,
+      "task_performance_std": 0.3717,
+      "learning_speed_mean": 0.3033,
+      "retention_mean": 0.9516,
+      "generalisation_mean": -0.0497,
+      "robustness_mean": 0.9981,
+      "compute_cost_mean_ms": 4715.273,
+      "compute_cost_mean": 4.7153,
+      "network_complexity_mean": 81.67,
+      "multi_objective_J": 1.1398,
+      "trials": [
+        {
+          "task_performance": -0.6083333333333331,
+          "learning_speed": -1.4799999999999995,
+          "retention": 0.587557603686636,
+          "generalisation": -0.14499999999999996,
+          "robustness": 1.0224978195443737,
+          "compute_cost_ms": 6818.196999956854,
+          "network_complexity": 80.0
+        },
+        {
+          "task_performance": 0.09333333333333359,
+          "learning_speed": 3.354999999999999,
+          "retention": 1.4640410958904109,
+          "generalisation": 0.005833333333333349,
+          "robustness": 0.9424587689915529,
+          "compute_cost_ms": 3407.255200028885,
+          "network_complexity": 91.0
+        },
+        {
+          "task_performance": -0.045000000000000075,
+          "learning_speed": -0.9649999999999999,
+          "retention": 0.803113553113553,
+          "generalisation": -0.010000000000000002,
+          "robustness": 1.0293286449410777,
+          "compute_cost_ms": 3920.3672999865375,
+          "network_complexity": 74.0
+        }
+      ]
+    }
+  },
+  "pareto_optimal_architectures": [
+    "A_FIXED",
+    "B_ADAPTIVE",
+    "C_ADAPTIVE_MEMORY",
+    "D_FULL_OMNIS",
+    "E_DEEP_RL_OMNIS"
+  ],
+  "comparisons": {
+    "D_vs_A_task_performance": {
+      "baseline": {
+        "n": 3,
+        "mean": -3.129444444444444,
+        "std": 5.033559689538621,
+        "ci_95_low": -15.633499893573616,
+        "ci_95_high": 9.374611004684729
+      },
+      "treatment": {
+        "n": 3,
+        "mean": -0.31944444444444425,
+        "std": 1.3537051350248295,
+        "ci_95_low": -3.6822344209496958,
+        "ci_95_high": 3.0433455320608074
+      },
+      "mean_diff": 2.8099999999999996,
+      "t_statistic": 0.9337448000291877,
+      "p_value": 0.4381605809654564,
+      "cohens_d": 0.7623994366828749,
+      "significant": false
+    },
+    "D_vs_A_robustness": {
+      "baseline": {
+        "n": 3,
+        "mean": 0.8168934495767942,
+        "std": 0.034490006264039,
+        "ci_95_low": 0.7312155243377898,
+        "ci_95_high": 0.9025713748157986
+      },
+      "treatment": {
+        "n": 3,
+        "mean": 1.0644801853651606,
+        "std": 0.14715003901305923,
+        "ci_95_low": 0.6989392241672878,
+        "ci_95_high": 1.4300211465630335
+      },
+      "mean_diff": 0.24758673578836643,
+      "t_statistic": 2.837359305031842,
+      "p_value": 0.09332796357616795,
+      "cohens_d": 2.3166941714219678,
+      "significant": false
+    },
+    "E_vs_A_task_performance": {
+      "baseline": {
+        "n": 3,
+        "mean": -3.129444444444444,
+        "std": 5.033559689538621,
+        "ci_95_low": -15.633499893573616,
+        "ci_95_high": 9.374611004684729
+      },
+      "treatment": {
+        "n": 3,
+        "mean": -0.1866666666666665,
+        "std": 0.37166666666666653,
+        "ci_95_low": -1.109937849533872,
+        "ci_95_high": 0.7366045162005391
+      },
+      "mean_diff": 2.9427777777777773,
+      "t_statistic": 1.0098623907394393,
+      "p_value": 0.41789108478944015,
+      "cohens_d": 0.8245491892462515,
+      "significant": false
+    },
+    "E_vs_D_task_performance": {
+      "baseline": {
+        "n": 3,
+        "mean": -0.31944444444444425,
+        "std": 1.3537051350248295,
+        "ci_95_low": -3.6822344209496958,
+        "ci_95_high": 3.0433455320608074
+      },
+      "treatment": {
+        "n": 3,
+        "mean": -0.1866666666666665,
+        "std": 0.37166666666666653,
+        "ci_95_low": -1.109937849533872,
+        "ci_95_high": 0.7366045162005391
+      },
+      "mean_diff": 0.13277777777777774,
+      "t_statistic": 0.16382526014429827,
+      "p_value": 0.8831587586194612,
+      "cohens_d": 0.1337627647774148,
+      "significant": false
+    }
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "config_version": "1.0.0",
+  "seed": 42,
+  "db_path": "datasets/omnis_state.db",
+  "world_width": 16,
+  "world_height": 16,
+  "continuous_world": false,
+  "initial_population": 6,
+  "default_neuron_model": "rate_coded",
+  "learning_rate": 0.08,
+  "plasticity_mode": "three_factor",
+  "regularization_lambda": 0.002,
+  "discount_gamma": 0.92,
+  "mutation_rate": 0.15,
+  "crossover_rate": 0.65,
+  "elite_fraction": 0.25,
+  "hardware_backend": "cpu_vector",
+  "allow_external_apis": false,
+  "require_api_auth": false,
+  "api_key": "omnis-research-key",
+  "quotas": {
+    "max_neurons_per_organism": 128,
+    "max_synapses_per_organism": 512,
+    "max_memories_per_organism": 500,
+    "max_population_size": 24,
+    "max_experiment_timeout_sec": 30.0,
+    "max_connectome_density": 0.35
+  },
+  "fitness_weights": {
+    "alpha": 1.0,
+    "beta": 0.4,
+    "gamma": 0.3,
+    "lambda": 0.1
+  }
+}

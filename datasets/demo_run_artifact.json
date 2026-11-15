@@ -1,0 +1,220 @@
+{
+  "project": "OMNIS 1.0",
+  "demonstration_steps": {
+    "1_organism_creation": {
+      "organism_id": "org_b8fa83bc",
+      "generation": 0,
+      "stage": "STAGE_2_DEVELOPMENT",
+      "initial_neurons": 22,
+      "initial_synapses": 85
+    },
+    "2_neural_visualization": {
+      "nodes": 22,
+      "edges": 85,
+      "density": 0.18398268398268397,
+      "modularity": -0.2093982391423073
+    },
+    "3_environmental_interactions": {
+      "ticks_simulated": 25,
+      "lead_cumulative_reward": 1.9,
+      "world_interactions": 10
+    },
+    "4_memory_dynamics": {
+      "initial_memories": 0,
+      "post_interaction_memories": 52,
+      "class_counts": {
+        "sensory": 17,
+        "working": 24,
+        "episodic": 2,
+        "semantic": 1,
+        "procedural": 1,
+        "long_term": 7,
+        "experimental": 0
+      }
+    },
+    "5_neural_adaptation": {
+      "changed_or_new_synapses": 84,
+      "post_synapses_count": 84,
+      "structural_events": [
+        {
+          "tick": 0,
+          "type": "neurogenesis",
+          "neuron_id": "hid_0059d0"
+        },
+        {
+          "tick": 0,
+          "type": "grow_synapses",
+          "count": 4
+        },
+        {
+          "tick": 10,
+          "type": "prune",
+          "count": 1
+        }
+      ]
+    },
+    "6_multi_agent_ecosystem": {
+      "active_organisms": 4,
+      "social_events_logged": 2,
+      "species_counts": {
+        "sp_rate_5": 1,
+        "sp_conv_5": 1,
+        "sp_lif_5": 1,
+        "sp_thre_5": 1
+      }
+    },
+    "7_evolutionary_experiment": {
+      "generation_1": {
+        "generation": 1,
+        "population_size": 4,
+        "elites": [
+          "org_b8fa83bc"
+        ],
+        "offspring": [
+          "org_848f407b",
+          "org_5ca43c5d",
+          "org_324054af"
+        ],
+        "best_fitness": 0.5806,
+        "mean_fitness": 0.1451
+      },
+      "generation_2": {
+        "generation": 2,
+        "population_size": 4,
+        "elites": [
+          "org_5ca43c5d"
+        ],
+        "offspring": [
+          "org_def6bae3",
+          "org_e40eb2aa",
+          "org_91b2667a"
+        ],
+        "best_fitness": 0.411,
+        "mean_fitness": 0.1028
+      },
+      "lineage_tracked": 10
+    },
+    "8_controlled_damage": {
+      "organism_id": "org_5ca43c5d",
+      "lesioned_neurons": [
+        "hid_1",
+        "hid_0",
+        "hid_5"
+      ],
+      "severed_synapses": [
+        "in_6->hid_7",
+        "in_6->hid_6",
+        "in_5->hid_7",
+        "in_3->hid_7",
+        "in_1->out_0",
+        "in_2->hid_4",
+        "hid_7->out_1",
+        "hid_4->out_0",
+        "in_2->hid_2",
+        "hid_6->out_4",
+        "hid_3->hid_4",
+        "in_0->hid_4",
+        "in_0->hid_7",
+        "in_0->out_3",
+        "in_5->hid_2",
+        "in_0->out_0"
+      ],
+      "remaining_active_neurons": 19,
+      "remaining_active_synapses": 38
+    },
+    "9_recovery_measurements": {
+      "performance_before": 0.6788,
+      "performance_damaged": 0.657,
+      "performance_after": 0.7646,
+      "final_recovery_ratio": 1.1265,
+      "recovery_curve": [
+        {
+          "t": 0,
+          "label": "damaged",
+          "performance": 0.657,
+          "recovery_ratio": 0.9679
+        },
+        {
+          "t": 1,
+          "label": "regen_round_1",
+          "performance": 0.7607,
+          "recovery_ratio": 1.1207,
+          "bypass_added": 8,
+          "neurons_generated": 2
+        },
+        {
+          "t": 2,
+          "label": "regen_round_2",
+          "performance": 0.7646,
+          "recovery_ratio": 1.1265,
+          "bypass_added": 8,
+          "neurons_generated": 0
+        },
+        {
+          "t": 3,
+          "label": "regen_round_3",
+          "performance": 0.7646,
+          "recovery_ratio": 1.1265,
+          "bypass_added": 8,
+          "neurons_generated": 0
+        }
+      ]
+    },
+    "10_architecture_comparison": {
+      "pareto_optimal": [
+        "A_FIXED",
+        "B_ADAPTIVE",
+        "C_ADAPTIVE_MEMORY",
+        "D_FULL_OMNIS",
+        "E_DEEP_RL_OMNIS"
+      ],
+      "architectures": {
+        "A_FIXED": {
+          "task_performance_mean": -3.1294,
+          "retention_mean": 0.6528,
+          "robustness_mean": 0.8169,
+          "network_complexity_mean": 63.33
+        },
+        "B_ADAPTIVE": {
+          "task_performance_mean": 0.1144,
+          "retention_mean": 0.9519,
+          "robustness_mean": 0.7888,
+          "network_complexity_mean": 62.33
+        },
+        "C_ADAPTIVE_MEMORY": {
+          "task_performance_mean": 0.6211,
+          "retention_mean": 1.1523,
+          "robustness_mean": 0.9396,
+          "network_complexity_mean": 60.67
+        },
+        "D_FULL_OMNIS": {
+          "task_performance_mean": -0.3194,
+          "retention_mean": 0.754,
+          "robustness_mean": 1.0645,
+          "network_complexity_mean": 80.67
+        },
+        "E_DEEP_RL_OMNIS": {
+          "task_performance_mean": -0.1867,
+          "retention_mean": 0.9516,
+          "robustness_mean": 0.9981,
+          "network_complexity_mean": 81.67
+        }
+      },
+      "ghost_engine_verdicts": {
+        "plasticity_vs_fixed": "supported",
+        "memory_replay_retention": "supported",
+        "developmental_vs_fixed": "supported",
+        "morpheus_regeneration": "supported"
+      }
+    }
+  },
+  "persistence": {
+    "saved_organisms": 4,
+    "saved_memories": 21,
+    "world_snapshot_id": "world_tick_35"
+  },
+  "benchmark_files": {
+    "json": "benchmarks/results\\latest_benchmark.json",
+    "markdown": "benchmarks/results\\latest_benchmark.md"
+  }
+}

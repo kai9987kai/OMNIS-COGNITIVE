@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="dark">
+  <title>OMNIS 1.0 | Scientific Cognitive Observatory</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <a href="#main-content" class="skip-link visually-hidden">Skip to observatory workspace</a>
+
+  <header class="top-header">
+    <div class="brand-block">
+      <div class="brand-sigil" aria-hidden="true">◎</div>
+      <div>
+        <h1>OMNIS 1.0 <span class="brand-sub">COGNITIVE OBSERVATORY</span></h1>
+        <p class="brand-meta">Experimental AI, Dynamic Connectome &amp; Artificial Life Workstation</p>
+      </div>
+    </div>
+
+    <div class="control-strip" role="group" aria-label="Simulation Controls">
+      <div class="status-pill" id="status-badge">
+        <span class="status-dot" aria-hidden="true"></span>
+        <span id="sim-status-text">OPERATIONAL</span>
+      </div>
+      <span class="tick-readout">TICK <strong id="header-tick">0</strong> · GEN <strong id="header-gen">0</strong></span>
+      <button type="button" id="btn-step-1" class="btn btn-cyan">Step +1</button>
+      <button type="button" id="btn-step-10" class="btn btn-cyan">Step +10</button>
+      <button type="button" id="btn-play-pause" class="btn btn-violet">Auto-Run</button>
+      <label for="speed-select" class="inline-label">Rate</label>
+      <select id="speed-select" class="sci-select">
+        <option value="1200">0.8x</option>
+        <option value="700" selected>1.5x</option>
+        <option value="300">3.0x</option>
+      </select>
+      <button type="button" id="btn-persist" class="btn btn-ghost">Save Snapshot</button>
+    </div>
+  </header>
+
+  <nav class="section-nav" aria-label="Observatory Sections">
+    <button type="button" class="nav-btn" data-view="command" aria-current="page">A · Command Centre</button>
+    <button type="button" class="nav-btn" data-view="connectome">B · 3D Connectome</button>
+    <button type="button" class="nav-btn" data-view="memory">C · Memory Observatory</button>
+    <button type="button" class="nav-btn" data-view="alife">D · Artificial Life</button>
+    <button type="button" class="nav-btn" data-view="world">E · World Simulator</button>
+    <button type="button" class="nav-btn" data-view="research">F · Research Lab</button>
+    <button type="button" class="nav-btn" data-view="hardware">G · Hardware &amp; Aether</button>
+    <button type="button" class="nav-btn" data-view="timeline">H · Timeline &amp; Morpheus</button>
+  </nav>
+
+  <div id="live-announcer" class="status-banner" aria-live="polite" aria-atomic="true">
+    Observatory synchronized with OMNIS Core.
+  </div>
+
+  <main id="main-content" tabindex="-1">
+    <!-- A. COMMAND CENTRE -->
+    <section id="view-command" class="view-panel active" aria-labelledby="heading-command">
+      <div class="panel-header">
+        <h2 id="heading-command">Command Centre — Global System Telemetry</h2>
+        <div class="panel-actions">
+          <label for="organism-select" class="inline-label">Focal Organism</label>
+          <select id="organism-select" class="sci-select"></select>
+          <button type="button" id="btn-reset-sim" class="btn btn-amber">Reset Ecosystem</button>
+        </div>
+      </div>
+
+      <div class="kpi-grid">
+        <article class="glass-card kpi-card">
+          <h3>Active Organisms</h3>
+          <p class="kpi-val" id="kpi-organisms">0 / 24</p>
+          <p class="kpi-sub" id="kpi-generation">Generation 0</p>
+        </article>
+        <article class="glass-card kpi-card">
+          <h3>Mean Neural Activity</h3>
+          <p class="kpi-val cyan-text" id="kpi-neural">0.000</p>
+          <p class="kpi-sub" id="kpi-synapses">0 active synapses</p>
+        </article>
+        <article class="glass-card kpi-card">
+          <h3>Memory Utilisation</h3>
+          <p class="kpi-val violet-text" id="kpi-memories">0</p>
+          <p class="kpi-sub">Across 7 cognitive tiers</p>
+        </article>
+        <article class="glass-card kpi-card">
+          <h3>Mean Population Fitness</h3>
+          <p class="kpi-val" id="kpi-fitness">0.000</p>
+          <p class="kpi-sub" id="kpi-latency">0.0 ms / tick</p>
+        </article>
+        <article class="glass-card kpi-card">
+          <h3>Compute Utilization</h3>
+          <p class="kpi-val amber-text" id="kpi-cpu">0%</p>
+          <p class="kpi-sub" id="kpi-gpu">CPU Vector Backend</p>
+        </article>
+        <article class="glass-card kpi-card">
+          <h3>Experiments Recorded</h3>
+          <p class="kpi-val" id="kpi-experiments">0</p>
+          <p class="kpi-sub">Ghost Engine validated</p>
+        </article>
+      </div>
+
+      <div class="split-grid">
+        <article class="glass-card">
+          <h3>Telemetry Trajectory (Fitness &amp; Synaptic Density)</h3>
+          <canvas id="command-chart" width="640" height="240" aria-label="Telemetry time series chart showing fitness and active synapses"></canvas>
+        </article>
+        <article class="glass-card">
+          <h3>EventBus Live Stream</h3>
+          <ul id="event-log-list" class="mono-list"></ul>
+        </article>
+      </div>
+    </section>
+
+    <!-- B. 3D CONNECTOME EXPLORER -->
+    <section id="view-connectome" class="view-panel" hidden aria-labelledby="heading-connectome">
+      <div class="panel-header">
+        <h2 id="heading-connectome">SONAPSE — Interactive 3D Connectome Explorer</h2>
+        <div class="panel-actions">
+          <button type="button" id="btn-conn-zoom-in" class="btn btn-ghost">Zoom +</button>
+          <button type="button" id="btn-conn-zoom-out" class="btn btn-ghost">Zoom −</button>
+          <button type="button" id="btn-conn-reset-cam" class="btn btn-ghost">Reset View</button>
+          <label for="playback-slider" class="inline-label">Checkpoint Playback</label>
+          <input id="playback-slider" type="range" min="0" max="0" value="0">
+        </div>
+      </div>
+
+      <div class="connectome-layout">
+        <div class="glass-card canvas-stage">
+          <div id="connectome-3d-container" class="three-host" aria-label="Interactive 3D neural connectome graph"></div>
+          <div class="legend-bar">
+            <span><i class="dot dot-cyan"></i> Excitatory Synapse / Active</span>
+            <span><i class="dot dot-violet"></i> Inhibitory Synapse</span>
+            <span><i class="dot dot-amber"></i> Signal Pulse / Lesioned</span>
+            <span class="hint-text">Drag to orbit · Scroll to zoom · Click neuron to inspect</span>
+          </div>
+        </div>
+
+        <aside class="glass-card inspector-panel" aria-label="Connectome Topology & Node Inspector">
+          <h3>Topological Metrics</h3>
+          <dl id="topology-metrics" class="kv-grid"></dl>
+
+          <h3>Selected Node / Connection</h3>
+          <div id="node-inspector" class="mono-box">Click any neuron in the 3D graph to inspect membrane potential u_i, activation a_i, model, and synaptic weights.</div>
+
+          <h3>Cognitive Pipeline State C_t</h3>
+          <pre id="cognitive-state-pre" class="mono-pre"></pre>
+        </aside>
+      </div>
+    </section>
+
+    <!-- C. MEMORY OBSERVATORY -->
+    <section id="view-memory" class="view-panel" hidden aria-labelledby="heading-memory">
+      <div class="panel-header">
+        <h2 id="heading-memory">MNEMORPH — Adaptive Memory Observatory</h2>
+        <div class="panel-actions">
+          <button type="button" id="btn-consolidate-mem" class="btn btn-cyan">Consolidate &amp; Replay</button>
+        </div>
+      </div>
+
+      <div class="split-grid">
+        <article class="glass-card">
+          <h3>Memory Hierarchy Utilisation (7 Cognitive Classes)</h3>
+          <canvas id="memory-bars-canvas" width="560" height="220" aria-label="Bar chart of memory counts across 7 cognitive memory classes"></canvas>
+          <dl id="memory-stats-kv" class="kv-grid"></dl>
+        </article>
+
+        <article class="glass-card">
+          <h3>Associative Memory Network &amp; Conflict Detector</h3>
+          <canvas id="memory-graph-canvas" width="560" height="240" aria-label="Memory association network graph"></canvas>
+          <div id="memory-conflicts-box" class="mono-box">No reward-valence conflicts detected.</div>
+        </article>
+      </div>
+    </section>
+
+    <!-- D. ARTIFICIAL LIFE LABORATORY -->
+    <section id="view-alife" class="view-panel" hidden aria-labelledby="heading-alife">
+      <div class="panel-header">
+        <h2 id="heading-alife">NEUROHIVE &amp; GENESIS — Artificial Life Laboratory</h2>
+        <div class="panel-actions">
+          <label for="spawn-model-select" class="inline-label">Model</label>
+          <select id="spawn-model-select" class="sci-select">
+            <option value="rate_coded">Rate-Coded</option>
+            <option value="conventional">Conventional</option>
+            <option value="lif">Spiking LIF</option>
+            <option value="threshold">Threshold</option>
+          </select>
+          <label class="checkbox-pill" for="spawn-deep-rl-check">
+            <input type="checkbox" id="spawn-deep-rl-check">
+            <span>Deep-RL (DQN)</span>
+          </label>
+          <button type="button" id="btn-spawn-org" class="btn btn-cyan">Spawn Organism</button>
+          <button type="button" id="btn-evolve-gen" class="btn btn-violet">Evolve Generation</button>
+        </div>
+      </div>
+
+      <div class="split-grid">
+        <article class="glass-card">
+          <h3>Population Roster</h3>
+          <div tabindex="0" role="region" aria-labelledby="pop-table-caption" class="table-wrapper">
+            <table>
+              <caption id="pop-table-caption">Active organisms, fitness decomposition, and connectome sizes</caption>
+              <thead>
+                <tr>
+                  <th scope="col">Organism</th>
+                  <th scope="col">Gen</th>
+                  <th scope="col">Species</th>
+                  <th scope="col">Stage</th>
+                  <th scope="col">Energy</th>
+                  <th scope="col">Fitness</th>
+                  <th scope="col">Neurons/Syn</th>
+                </tr>
+              </thead>
+              <tbody id="population-tbody"></tbody>
+            </table>
+          </div>
+        </article>
+
+        <article class="glass-card">
+          <h3>Lineage &amp; Social Interaction Dynamics</h3>
+          <canvas id="fitness-dist-canvas" width="520" height="140" aria-label="Population fitness distribution histogram"></canvas>
+          <h4>Phylogenetic Lineage Tree</h4>
+          <canvas id="lineage-tree-canvas" width="520" height="160" aria-label="Phylogenetic lineage tree of organisms across generations"></canvas>
+          <h4>Recent Cooperation / Competition &amp; Lineage Events</h4>
+          <ul id="social-events-list" class="mono-list"></ul>
+        </article>
+      </div>
+    </section>
+
+    <!-- E. WORLD SIMULATOR -->
+    <section id="view-world" class="view-panel" hidden aria-labelledby="heading-world">
+      <div class="panel-header">
+        <h2 id="heading-world">DIAMOND — Persistent World Simulator</h2>
+        <div class="panel-actions">
+          <button type="button" id="btn-task-0" class="btn btn-cyan">Task 0 · Foraging</button>
+          <button type="button" id="btn-task-1" class="btn btn-violet">Task 1 · Shifted Beacon</button>
+        </div>
+      </div>
+
+      <div class="split-grid">
+        <article class="glass-card world-stage">
+          <canvas id="world-canvas" width="520" height="520" aria-label="DIAMOND 2D environment grid showing agents, energy resources, obstacles, hazards, and beacon"></canvas>
+          <div class="legend-bar">
+            <span><i class="dot dot-cyan"></i> Organism</span>
+            <span><i class="dot dot-green"></i> Energy Resource</span>
+            <span><i class="dot dot-amber"></i> Hazard / Mobile Entity</span>
+            <span><i class="dot dot-violet"></i> Task Beacon</span>
+          </div>
+        </article>
+
+        <article class="glass-card">
+          <h3>Environment Telemetry &amp; Interaction Feed</h3>
+          <dl id="world-kv" class="kv-grid"></dl>
+          <h4>Recent Environmental Transitions</h4>
+          <ul id="world-interactions-list" class="mono-list"></ul>
+        </article>
+      </div>
+    </section>
+
+    <!-- F. RESEARCH LABORATORY -->
+    <section id="view-research" class="view-panel" hidden aria-labelledby="heading-research">
+      <div class="panel-header">
+        <h2 id="heading-research">GHOST ENGINE — Autonomous Research Laboratory</h2>
+        <div class="panel-actions">
+          <label for="exp-select" class="inline-label">Experiment</label>
+          <select id="exp-select" class="sci-select">
+            <option value="plasticity_vs_fixed">Plasticity vs Fixed</option>
+            <option value="memory_replay_retention">Memory Replay Retention</option>
+            <option value="developmental_vs_fixed">Developmental vs Fixed</option>
+            <option value="morpheus_regeneration">Morpheus Regeneration</option>
+          </select>
+          <button type="button" id="btn-run-exp" class="btn btn-cyan">Run Experiment</button>
+          <button type="button" id="btn-run-bench" class="btn btn-violet">Run A–E Benchmark</button>
+          <button type="button" id="btn-propose-si" class="btn btn-amber">Propose Self-Improvement</button>
+          <button type="button" id="btn-export-research" class="btn btn-ghost">Export JSON</button>
+        </div>
+      </div>
+
+      <article class="glass-card">
+        <h3>Architecture Benchmark Suite (A · B · C · D · E)</h3>
+        <div tabindex="0" role="region" aria-labelledby="bench-caption" class="table-wrapper">
+          <table>
+            <caption id="bench-caption">Multi-seed comparative metrics and multi-objective score J(theta)</caption>
+            <thead>
+              <tr>
+                <th scope="col">Architecture</th>
+                <th scope="col">Task Perf</th>
+                <th scope="col">Learning Speed</th>
+                <th scope="col">Retention</th>
+                <th scope="col">Generalisation</th>
+                <th scope="col">Robustness</th>
+                <th scope="col">Complexity</th>
+                <th scope="col">J(&theta;)</th>
+              </tr>
+            </thead>
+            <tbody id="benchmark-tbody"></tbody>
+          </table>
+        </div>
+        <h4>Multi-Objective Pareto Frontier (Task Performance vs. Compute Latency)</h4>
+        <canvas id="pareto-canvas" width="560" height="180" aria-label="Multi-objective Pareto frontier chart plotting task performance against compute cost"></canvas>
+      </article>
+
+      <div class="split-grid">
+        <article class="glass-card">
+          <h3>Ghost Engine Hypothesis Validations</h3>
+          <ul id="experiments-list" class="mono-list"></ul>
+        </article>
+        <article class="glass-card">
+          <h3>Controlled Self-Improvement &amp; Audit Trail</h3>
+          <div id="proposals-box" class="mono-box">No active configuration proposals.</div>
+          <ul id="audit-list" class="mono-list"></ul>
+        </article>
+      </div>
+    </section>
+
+    <!-- G. HARDWARE OBSERVATORY -->
+    <section id="view-hardware" class="view-panel" hidden aria-labelledby="heading-hardware">
+      <div class="panel-header">
+        <h2 id="heading-hardware">Hardware &amp; Supermix-Aether Observatory</h2>
+        <div class="panel-actions">
+          <button type="button" id="btn-quantum-opt" class="btn btn-violet">Quantum-Inspired Annealing</button>
+          <button type="button" id="btn-parallel-sweep" class="btn btn-cyan">Run Parallel Worker Sweep</button>
+          <button type="button" id="btn-pytorch-pass" class="btn btn-ghost">Test PyTorch Tensor Pass</button>
+        </div>
+      </div>
+
+      <div class="split-grid">
+        <article class="glass-card">
+          <h3>Compute &amp; Neuromorphic Simulation Abstraction</h3>
+          <dl id="hardware-kv" class="kv-grid"></dl>
+          <div id="hardware-action-box" class="mono-box">Run quantum annealing, parallel worker sweeps, or PyTorch tensor passes above to inspect measurements.</div>
+        </article>
+
+        <article class="glass-card">
+          <h3>Supermix-Aether Specialist Orchestrator</h3>
+          <div tabindex="0" role="region" aria-labelledby="models-caption" class="table-wrapper">
+            <table>
+              <caption id="models-caption">Registered specialist models, backend types, health, and latencies</caption>
+              <thead>
+                <tr>
+                  <th scope="col">Model ID</th>
+                  <th scope="col">Backend</th>
+                  <th scope="col">Health</th>
+                  <th scope="col">Calls</th>
+                  <th scope="col">Avg Latency</th>
+                </tr>
+              </thead>
+              <tbody id="models-tbody"></tbody>
+            </table>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <!-- H. DEVELOPMENT TIMELINE & MORPHEUS -->
+    <section id="view-timeline" class="view-panel" hidden aria-labelledby="heading-timeline">
+      <div class="panel-header">
+        <h2 id="heading-timeline">Development Timeline &amp; MORPHEUS Regenerative Computing</h2>
+        <div class="panel-actions">
+          <button type="button" id="btn-advance-stage" class="btn btn-cyan">Advance Developmental Stage</button>
+          <button type="button" id="btn-morpheus-run" class="btn btn-amber">Simulate 30% Lesion &amp; Recover</button>
+        </div>
+      </div>
+
+      <div class="split-grid">
+        <article class="glass-card">
+          <h3>Developmental Stages &amp; Checkpoints</h3>
+          <p class="stage-strip" id="stage-readout">Current Stage: STAGE_1_GENESIS</p>
+          <div id="stage-progress-strip" class="stage-pills" role="list" aria-label="8-stage developmental progression"></div>
+          <div id="checkpoint-diff-box" class="mono-box">Advancing simulation ticks records checkpoints automatically.</div>
+          <ul id="checkpoints-list" class="mono-list"></ul>
+        </article>
+
+        <article class="glass-card">
+          <h3>MORPHEUS Recovery(t) = P_after(t) / P_before</h3>
+          <canvas id="recovery-canvas" width="540" height="220" aria-label="Morpheus functional recovery curve after controlled network lesion"></canvas>
+          <div id="morpheus-summary" class="mono-box">Trigger a controlled lesion experiment to measure bypass synaptogenesis and Recovery(t).</div>
+        </article>
+      </div>
+    </section>
+  </main>
+
+  <footer class="obs-footer">
+    <span>OMNIS 1.0 Research Platform · Local CPU &amp; Simulated Neuromorphic Execution</span>
+    <span id="footer-db-info">Persistence: SQLite</span>
+  </footer>
+
+  <!-- Three.js optional progressive enhancement; app.js provides built-in 3D WebGL/Canvas fallback if offline -->
+  <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js" defer></script>
+  <script src="/static/app.js" defer></script>
+</body>
+</html>
