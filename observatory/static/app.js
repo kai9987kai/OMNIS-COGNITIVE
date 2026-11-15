@@ -3,6 +3,11 @@
     currentView: "command",
     selectedOrganismId: null,
     autoRunTimer: null,
+    livePlasticityTimer: null,
+    liveStepInFlight: false,
+    manualRpeTouched: false,
+    signalsPaused: false,
+    offscreenPaused: false,
     connectomeGraph: null,
     selectedNodeId: null,
     camRotY: 0.35,
@@ -235,18 +240,36 @@
         host.appendChild(renderer.domElement);
         const group = new THREE.Group();
         scene.add(group);
-        state.threeCtx = { THREE, scene, camera, renderer, group, nodeMeshes: [] };
+        state.threeCtx = {
+          THREE,
+          scene,
+          camera,
+          renderer,
+          group,
+          nodeMeshes: [],
+          nodeMeshMap: {},
+          signalMeshes: [],
+        };
 
         const raycaster = new THREE.Raycaster();
         const pointer = new THREE.Vector2();
-        renderer.domElement.addEventListener("click", (ev) => {
+        const hitTestNode = (ev) => {
           const rect = renderer.domElement.getBoundingClientRect();
           pointer.x = ((ev.clientX - rect.left) / rect.width) * 2 - 1;
           pointer.y = -((ev.clientY - rect.top) / rect.height) * 2 + 1;
           raycaster.setFromCamera(pointer, camera);
           const hits = raycaster.intersectObjects(state.threeCtx.nodeMeshes);
-          if (hits.length) {
-            inspectNode(hits[0].object.userData.node);
+          return hits.length ? hits[0].object.userData.node : null;
+        };
+        renderer.domElement.addEventListener("click", (ev) => {
+          const node = hitTestNode(ev);
+          if (node) inspectNode(node);
+        });
+        renderer.domElement.addEventListener("dblclick", (ev) => {
+          const node = hitTestNode(ev);
+          if (node) {
+            inspectNode(node);
+            stimulateNeuron(node.neuron_id);
           }
         });
       } catch (_) {
@@ -262,14 +285,39 @@
       canvas.style.height = "100%";
       host.appendChild(canvas);
       state.fallback3DCanvas = canvas;
-      canvas.addEventListener("click", (ev) => {
-        if (!state.projectedNodes) return;
+      const pick2DNode = (ev) => {
+        if (!state.projectedNodes) return null;
         const rect = canvas.getBoundingClientRect();
         const mx = ((ev.clientX - rect.left) / rect.width) * canvas.width;
         const my = ((ev.clientY - rect.top) / rect.height) * canvas.height;
         const hit = state.projectedNodes.find((n) => Math.hypot(n.sx - mx, n.sy - my) < 14);
-        if (hit) inspectNode(hit.raw);
+        return hit ? hit.raw : null;
+      };
+      canvas.addEventListener("click", (ev) => {
+        const node = pick2DNode(ev);
+        if (node) inspectNode(node);
       });
+      canvas.addEventListener("dblclick", (ev) => {
+        const node = pick2DNode(ev);
+        if (node) {
+          inspectNode(node);
+          stimulateNeuron(node.neuron_id);
+        }
+      });
+    }
+
+    const stageEl = $("#connectome-canvas-stage") || host;
+    const supportsCV = "contentVisibility" in document.documentElement.style;
+    stageEl.addEventListener("contentvisibilityautostatechange", (ev) => {
+      state.offscreenPaused = Boolean(ev.skipped);
+    });
+    if (!supportsCV && typeof IntersectionObserver !== "undefined") {
+      const io = new IntersectionObserver((entries) => {
+        entries.forEach((entry) => {
+          state.offscreenPaused = !entry.isIntersecting;
+        });
+      });
+      io.observe(stageEl);
     }
 
     let dragging = false;
@@ -293,10 +341,14 @@
       state.camZoom = Math.max(0.45, Math.min(2.5, state.camZoom - e.deltaY * 0.001));
     }, { passive: false });
 
+    const motionQuery = window.matchMedia ? window.matchMedia("(prefers-reduced-motion: reduce)") : null;
     const animate = () => {
       requestAnimationFrame(animate);
-      state.signalPhase = (state.signalPhase + 0.025) % 1.0;
-      if (state.currentView === "connectome" && state.connectomeGraph) {
+      const reduced = Boolean(motionQuery && motionQuery.matches);
+      if (!state.signalsPaused && !state.offscreenPaused && !reduced) {
+        state.signalPhase = (state.signalPhase + 0.028) % 1.0;
+      }
+      if (state.currentView === "connectome" && state.connectomeGraph && !state.offscreenPaused) {
         render3DConnectomeFrame();
       }
     };
@@ -309,15 +361,25 @@
     const edges = (state.connectomeGraph?.edges || []).filter(
       (e) => e.source === node.neuron_id || e.target === node.neuron_id
     );
-    $("#node-inspector").innerHTML =
+    edges.sort((a, b) => Math.abs(b.last_dw || 0) - Math.abs(a.last_dw || 0) || Math.abs(b.weight) - Math.abs(a.weight));
+    const inspector = $("#node-inspector");
+    inspector.innerHTML =
       `<strong>${escapeHtml(node.neuron_id)}</strong> (${escapeHtml(node.role)} · ${escapeHtml(node.neuron_model)})<br>` +
       `Active: ${node.active} · Excitatory: ${node.excitatory}<br>` +
       `Membrane u_i: ${node.u.toFixed(4)} · Activation a_i: ${node.a.toFixed(4)}<br>` +
       `Connected synapses: ${edges.length}<br>` +
       edges
         .slice(0, 6)
-        .map((e) => `${escapeHtml(e.source)} → ${escapeHtml(e.target)} (w=${e.weight.toFixed(3)})`)
-        .join("<br>");
+        .map(
+          (e) =>
+            `${escapeHtml(e.source)} → ${escapeHtml(e.target)} (w=${e.weight.toFixed(3)}, Δw=${Number(e.last_dw || 0) >= 0 ? "+" : ""}${Number(e.last_dw || 0).toFixed(4)})`
+        )
+        .join("<br>") +
+      `<div class="inspector-actions"><button type="button" id="btn-inspect-stimulate" class="btn btn-primary">Pulse ${escapeHtml(node.neuron_id)}</button></div>`;
+    const btn = $("#btn-inspect-stimulate");
+    if (btn) {
+      btn.addEventListener("click", () => stimulateNeuron(node.neuron_id));
+    }
   }
 
   function rebuildThreeGraph(graph) {
@@ -325,6 +387,8 @@
     const { THREE, group } = state.threeCtx;
     while (group.children.length) group.remove(group.children[0]);
     state.threeCtx.nodeMeshes = [];
+    state.threeCtx.nodeMeshMap = {};
+    state.threeCtx.signalMeshes = [];
 
     const posMap = {};
     graph.nodes.forEach((n) => {
@@ -343,9 +407,20 @@
       const mat = new THREE.MeshBasicMaterial({ color });
       const mesh = new THREE.Mesh(geo, mat);
       mesh.position.copy(posMap[n.neuron_id]);
-      mesh.userData = { node: n };
+      const baseScale = 1.0 + Math.min(0.65, Math.abs(n.a || 0) * 0.55);
+      mesh.scale.setScalar(baseScale);
+      mesh.userData = { node: n, baseScale };
       group.add(mesh);
       state.threeCtx.nodeMeshes.push(mesh);
+      state.threeCtx.nodeMeshMap[n.neuron_id] = mesh;
+
+      if (state.selectedNodeId === n.neuron_id) {
+        const haloGeo = new THREE.SphereGeometry(n.role === "hidden" ? 0.52 : 0.62, 12, 12);
+        const haloMat = new THREE.MeshBasicMaterial({ color: 0xffffff, wireframe: true, transparent: true, opacity: 0.65 });
+        const halo = new THREE.Mesh(haloGeo, haloMat);
+        halo.position.copy(mesh.position);
+        group.add(halo);
+      }
     });
 
     graph.edges.forEach((e) => {
@@ -353,9 +428,68 @@
       const p2 = posMap[e.target];
       if (!p1 || !p2) return;
       const geom = new THREE.BufferGeometry().setFromPoints([p1, p2]);
-      const color = !e.active ? 0x553311 : e.weight >= 0 ? 0x00e5ff : 0x9d6bff;
-      const mat = new THREE.LineBasicMaterial({ color, transparent: true, opacity: e.active ? 0.55 : 0.18 });
+      const dw = Number(e.last_dw || 0);
+      const dwStrong = Math.abs(dw) > 0.002;
+      const color = !e.active
+        ? 0x553311
+        : dw > 0.002
+        ? 0x26e3a8
+        : dw < -0.002
+        ? 0xff5b84
+        : e.weight >= 0
+        ? 0x00e5ff
+        : 0x9d6bff;
+      const opacity = !e.active
+        ? 0.16
+        : dwStrong
+        ? Math.min(0.95, 0.6 + Math.abs(dw) * 8)
+        : Math.min(0.75, 0.25 + Math.abs(e.weight) * 0.35);
+      const mat = new THREE.LineBasicMaterial({ color, transparent: true, opacity });
       group.add(new THREE.Line(geom, mat));
+    });
+
+    const signals = Array.isArray(graph.recent_signals) && graph.recent_signals.length
+      ? graph.recent_signals.slice(0, 64)
+      : graph.edges
+          .filter((e) => e.active && Math.abs(e.weight) > 0.22)
+          .slice(0, 14)
+          .map((e) => ({
+            pre_id: e.source,
+            post_id: e.target,
+            flux: e.weight * 0.35,
+            excitatory: e.weight >= 0,
+            ambient: true,
+          }));
+
+    signals.forEach((sig, idx) => {
+      const p1 = posMap[sig.pre_id];
+      const p2 = posMap[sig.post_id];
+      if (!p1 || !p2) return;
+      const mag = Math.abs(Number(sig.flux || 0));
+      const pRadius = sig.ambient ? 0.09 : Math.min(0.24, 0.11 + mag * 0.09);
+      const sGeo = new THREE.SphereGeometry(pRadius, 8, 8);
+      const sColor = sig.ambient
+        ? 0xffb020
+        : Number(sig.flux || 0) >= 0
+        ? mag > 0.45
+          ? 0xffffff
+          : 0xffb020
+        : 0xff5b84;
+      const sMat = new THREE.MeshBasicMaterial({
+        color: sColor,
+        transparent: true,
+        opacity: sig.ambient ? 0.45 : 0.95,
+      });
+      const sMesh = new THREE.Mesh(sGeo, sMat);
+      sMesh.position.copy(p1);
+      sMesh.userData = {
+        startVec: p1,
+        endVec: p2,
+        phaseOffset: (idx * 0.17) % 1.0,
+        speed: sig.ambient ? 0.65 : 0.8 + Math.min(1.4, mag * 0.9),
+      };
+      group.add(sMesh);
+      state.threeCtx.signalMeshes.push(sMesh);
     });
   }
 
@@ -363,7 +497,21 @@
     const graph = state.connectomeGraph;
     if (!graph) return;
     if (state.threeCtx) {
-      const { renderer, scene, camera, group } = state.threeCtx;
+      const { renderer, scene, camera, group, signalMeshes, nodeMeshes } = state.threeCtx;
+      (signalMeshes || []).forEach((sMesh) => {
+        const d = sMesh.userData;
+        const t = (state.signalPhase * d.speed + d.phaseOffset) % 1.0;
+        sMesh.position.lerpVectors(d.startVec, d.endVec, t);
+        const pulse = 0.85 + 0.3 * Math.sin(t * Math.PI);
+        sMesh.scale.setScalar(pulse);
+      });
+      (nodeMeshes || []).forEach((nMesh) => {
+        const d = nMesh.userData;
+        if (d && d.node && Math.abs(d.node.a || 0) > 0.05) {
+          const breathe = 1 + 0.08 * Math.sin(state.signalPhase * Math.PI * 2) * Math.min(1, Math.abs(d.node.a));
+          nMesh.scale.setScalar(d.baseScale * breathe);
+        }
+      });
       group.rotation.y = state.camRotY;
       group.rotation.x = state.camRotX;
       camera.position.z = 16 / state.camZoom;
@@ -403,25 +551,45 @@
       const a = proj[e.source];
       const b = proj[e.target];
       if (!a || !b) return;
+      const dw = Number(e.last_dw || 0);
+      const dwStrong = Math.abs(dw) > 0.002;
       ctx.strokeStyle = !e.active
         ? "rgba(255,176,32,0.18)"
+        : dw > 0.002
+        ? `rgba(38,227,168,${Math.min(0.95, 0.55 + Math.abs(dw) * 8)})`
+        : dw < -0.002
+        ? `rgba(255,91,132,${Math.min(0.95, 0.55 + Math.abs(dw) * 8)})`
         : e.weight >= 0
         ? `rgba(0,229,255,${Math.min(0.85, 0.2 + Math.abs(e.weight) * 0.45)})`
         : `rgba(157,107,255,${Math.min(0.85, 0.2 + Math.abs(e.weight) * 0.45)})`;
-      ctx.lineWidth = Math.max(1, Math.min(3.5, Math.abs(e.weight) * 1.8));
+      ctx.lineWidth = Math.max(1, Math.min(4, Math.abs(e.weight) * 1.8 + (dwStrong ? 1.0 : 0)));
       ctx.beginPath();
       ctx.moveTo(a.sx, a.sy);
       ctx.lineTo(b.sx, b.sy);
       ctx.stroke();
+    });
 
-      if (e.active && Math.abs(e.weight) > 0.15) {
-        const px = a.sx + (b.sx - a.sx) * state.signalPhase;
-        const py = a.sy + (b.sy - a.sy) * state.signalPhase;
-        ctx.fillStyle = "#ffb020";
-        ctx.beginPath();
-        ctx.arc(px, py, 2.2, 0, Math.PI * 2);
-        ctx.fill();
-      }
+    const sigs = Array.isArray(graph.recent_signals) && graph.recent_signals.length
+      ? graph.recent_signals.slice(0, 64)
+      : graph.edges
+          .filter((e) => e.active && Math.abs(e.weight) > 0.22)
+          .slice(0, 14)
+          .map((e) => ({ pre_id: e.source, post_id: e.target, flux: e.weight * 0.35, ambient: true }));
+
+    sigs.forEach((sig, idx) => {
+      const a = proj[sig.pre_id];
+      const b = proj[sig.post_id];
+      if (!a || !b) return;
+      const mag = Math.abs(Number(sig.flux || 0));
+      const spd = sig.ambient ? 0.65 : 0.8 + Math.min(1.4, mag * 0.9);
+      const t = (state.signalPhase * spd + (idx * 0.17) % 1.0) % 1.0;
+      const px = a.sx + (b.sx - a.sx) * t;
+      const py = a.sy + (b.sy - a.sy) * t;
+      const rad = sig.ambient ? 2.1 : Math.min(5.0, 2.5 + mag * 2.1);
+      ctx.fillStyle = sig.ambient ? "rgba(255,176,32,0.55)" : Number(sig.flux || 0) >= 0 ? "#ffb020" : "#ff5b84";
+      ctx.beginPath();
+      ctx.arc(px, py, rad, 0, Math.PI * 2);
+      ctx.fill();
     });
 
     projectedList
@@ -439,7 +607,7 @@
           ? "#00e5ff"
           : "#9d6bff";
         ctx.beginPath();
-        ctx.arc(sx, sy, radius + Math.min(4, Math.abs(raw.a) * 3), 0, Math.PI * 2);
+        ctx.arc(sx, sy, radius + Math.min(4.5, Math.abs(raw.a) * 3.2), 0, Math.PI * 2);
         ctx.fill();
         if (state.selectedNodeId === raw.neuron_id) {
           ctx.strokeStyle = "#ffffff";
@@ -456,15 +624,177 @@
     refreshConnectome(Number($("#playback-slider").value));
   });
 
-  async function refreshConnectome(checkpointIdx = null) {
-    init3DConnectomeHost();
-    const params = new URLSearchParams();
-    if (state.selectedOrganismId) params.set("organism_id", state.selectedOrganismId);
-    if (checkpointIdx !== null && Number.isFinite(checkpointIdx)) {
-      params.set("checkpoint_index", String(checkpointIdx));
+  if ($("#conn-reward-slider")) {
+    $("#conn-reward-slider").addEventListener("input", (ev) => {
+      state.manualRpeTouched = true;
+      const val = Number(ev.target.value);
+      const out = $("#conn-reward-val");
+      if (out) out.textContent = `${val >= 0 ? "+" : ""}${val.toFixed(2)}`;
+    });
+  }
+
+  if ($("#btn-stimulate-conn")) {
+    $("#btn-stimulate-conn").addEventListener("click", () => stimulateNeuron(null));
+  }
+
+  if ($("#conn-plasticity-mode")) {
+    $("#conn-plasticity-mode").addEventListener("change", () => stimulateNeuron(null));
+  }
+
+  if ($("#btn-toggle-signals")) {
+    $("#btn-toggle-signals").addEventListener("click", (ev) => {
+      state.signalsPaused = !state.signalsPaused;
+      ev.currentTarget.textContent = state.signalsPaused ? "Resume Pulses" : "Pause Pulses";
+      announce(state.signalsPaused ? "Live signal pulses paused" : "Live signal pulses resumed");
+    });
+  }
+
+  if ($("#btn-live-plasticity")) {
+    $("#btn-live-plasticity").addEventListener("click", (ev) => {
+      const btn = ev.currentTarget;
+      if (state.livePlasticityTimer) {
+        clearInterval(state.livePlasticityTimer);
+        state.livePlasticityTimer = null;
+        btn.textContent = "Live Stream: OFF";
+        btn.classList.remove("btn-stream-active");
+        announce("Live plasticity stream stopped");
+      } else {
+        btn.textContent = "Live Stream: ON";
+        btn.classList.add("btn-stream-active");
+        runLivePlasticityStep();
+        state.livePlasticityTimer = setInterval(() => {
+          if (state.currentView === "connectome") {
+            runLivePlasticityStep();
+          }
+        }, 450);
+        announce("Live plasticity stream started");
+      }
+    });
+  }
+
+  function renderPlasticityOscilloscope(history) {
+    const canvas = $("#plasticity-oscilloscope-canvas");
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    const w = canvas.width;
+    const h = canvas.height;
+    ctx.clearRect(0, 0, w, h);
+
+    ctx.strokeStyle = "rgba(148, 163, 184, 0.14)";
+    ctx.lineWidth = 1;
+    for (let i = 1; i <= 3; i++) {
+      const y = (h * i) / 4;
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(w, y);
+      ctx.stroke();
     }
-    const qs = params.toString() ? `?${params.toString()}` : "";
-    const data = await api(`/api/connectome${qs}`);
+
+    const meta = $("#oscilloscope-meta");
+    if (!Array.isArray(history) || !history.length) {
+      if (meta) meta.textContent = "Awaiting plasticity ticks";
+      ctx.fillStyle = "rgba(148, 163, 184, 0.65)";
+      ctx.font = "12px monospace";
+      ctx.fillText("Click 'Pulse & Induce Plasticity' or enable 'Live Stream' to record synaptic plasticity waves.", 16, h / 2);
+      return;
+    }
+
+    if (meta) {
+      meta.textContent = `${history.length} ticks · step ${history[0].step} → ${history[history.length - 1].step}`;
+    }
+
+    const pad = 16;
+    const plotW = w - pad * 2;
+    const plotH = h - pad * 2;
+    const n = history.length;
+    const xAt = (idx) => (n === 1 ? pad + plotW / 2 : pad + (idx / (n - 1)) * plotW);
+    const maxDw = Math.max(0.05, ...history.map((pt) => Number(pt.weight_delta_norm || 0)));
+    const maxCount = Math.max(1, ...history.map((pt) => Math.max(Number(pt.ltp_count || 0), Number(pt.ltd_count || 0))));
+
+    history.forEach((pt, idx) => {
+      const x = xAt(idx);
+      const ltpH = (Number(pt.ltp_count || 0) / maxCount) * (plotH * 0.25);
+      const ltdH = (Number(pt.ltd_count || 0) / maxCount) * (plotH * 0.25);
+      if (ltpH > 0.5) {
+        ctx.fillStyle = "rgba(38, 227, 168, 0.24)";
+        ctx.fillRect(x - 2, h - pad - ltpH, 4, ltpH);
+      }
+      if (ltdH > 0.5) {
+        ctx.fillStyle = "rgba(255, 91, 132, 0.22)";
+        ctx.fillRect(x + 2, h - pad - ltdH, 3, ltdH);
+      }
+    });
+
+    const drawSeries = (color, getY) => {
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      history.forEach((pt, idx) => {
+        const x = xAt(idx);
+        const y = Math.max(pad, Math.min(h - pad, getY(pt)));
+        if (idx === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      });
+      ctx.stroke();
+    };
+
+    drawSeries("#00e5ff", (pt) => h - pad - (Number(pt.weight_delta_norm || 0) / maxDw) * plotH * 0.88);
+    drawSeries("#ffb020", (pt) => h - pad - ((Number(pt.dopamine || 0) + 1.0) / 2.0) * plotH * 0.85);
+    drawSeries("#26e3a8", (pt) => h - pad - Math.max(0, Math.min(1, Number(pt.acetylcholine || 0.5))) * plotH * 0.85);
+    drawSeries("#ff5b84", (pt) => h - pad - Math.max(0, Math.min(1, Number(pt.norepinephrine || 0.2))) * plotH * 0.85);
+  }
+
+  function renderPlasticityEvents(graph) {
+    const list = $("#plasticity-events-list");
+    if (!list) return;
+    const pEvents = (graph.recent_plasticity_events || []).slice(0, 14).map((ev) => {
+      const badge = ev.kind === "LTP" ? `<span class="ltp-badge">LTP</span>` : `<span class="ltd-badge">LTD</span>`;
+      const sign = Number(ev.dw || 0) >= 0 ? "+" : "";
+      return `<li>${badge}<strong>${escapeHtml(ev.synapse_id)}</strong> · Δw=${sign}${Number(ev.dw).toFixed(5)} · w=${Number(ev.weight).toFixed(4)} · e=${Number(ev.eligibility).toFixed(3)}</li>`;
+    });
+    const sEvents = (graph.structural_events || []).slice(-6).reverse().map(
+      (se) =>
+        `<li><span class="struct-badge">STRUCT</span>[t=${se.tick ?? 0}] <strong>${escapeHtml(se.type || "event")}</strong> ${se.count ? `count=${se.count}` : se.neuron_id ? escapeHtml(se.neuron_id) : ""}</li>`
+    );
+    const items = [...pEvents, ...sEvents];
+    list.innerHTML = items.length
+      ? items.join("")
+      : `<li>No plasticity events recorded yet — click Pulse &amp; Induce Plasticity or start Live Stream.</li>`;
+  }
+
+  function updatePlasticityVisuals(data) {
+    const graph = data.graph || {};
+    const nm = graph.neuromodulators || {};
+    const hist = graph.plasticity_history || [];
+    const latest = hist.length ? hist[hist.length - 1] : null;
+    const pEvents = graph.recent_plasticity_events || [];
+    const ltpCount = latest ? latest.ltp_count : pEvents.filter((e) => e.kind === "LTP").length;
+    const ltdCount = latest ? latest.ltd_count : pEvents.filter((e) => e.kind === "LTD").length;
+
+    const sigEl = $("#hud-signals-count");
+    if (sigEl) sigEl.textContent = String((graph.recent_signals || []).length);
+    const dwEl = $("#hud-dw-norm");
+    if (dwEl) dwEl.textContent = Number(graph.last_weight_delta_norm || 0).toFixed(5);
+    const ltpEl = $("#hud-ltp-ltd");
+    if (ltpEl) ltpEl.textContent = `${ltpCount} / ${ltdCount}`;
+    const nmEl = $("#hud-neuromod");
+    if (nmEl) {
+      nmEl.textContent = `DA ${Number(nm.dopamine || 0).toFixed(2)} · ACh ${Number(nm.acetylcholine ?? 0.5).toFixed(2)} · NE ${Number(nm.norepinephrine ?? 0.2).toFixed(2)}`;
+    }
+    const synEl = $("#hud-synops");
+    if (synEl) synEl.textContent = String(graph.total_synops || 0);
+    const modeBadge = $("#plasticity-mode-badge");
+    if (modeBadge) modeBadge.textContent = `Mode: ${data.plasticity_mode || "three_factor"}`;
+    const modeSel = $("#conn-plasticity-mode");
+    if (modeSel && data.plasticity_mode && document.activeElement !== modeSel) {
+      modeSel.value = data.plasticity_mode;
+    }
+
+    renderPlasticityOscilloscope(hist);
+    renderPlasticityEvents(graph);
+  }
+
+  function applyConnectomePayload(data, checkpointIdx = null) {
     const slider = $("#playback-slider");
     const maxIdx = Math.max(0, (data.checkpoints_count || 1) - 1);
     slider.max = String(maxIdx);
@@ -472,6 +802,12 @@
 
     state.connectomeGraph = data.graph;
     rebuildThreeGraph(data.graph);
+    updatePlasticityVisuals(data);
+
+    if (state.selectedNodeId) {
+      const updatedNode = (data.graph?.nodes || []).find((n) => n.neuron_id === state.selectedNodeId);
+      if (updatedNode) inspectNode(updatedNode);
+    }
 
     const t = data.topology;
     renderKV("#topology-metrics", [
@@ -486,6 +822,71 @@
     ]);
 
     $("#cognitive-state-pre").textContent = JSON.stringify(data.cognitive_state || { note: "Step simulation to populate C_t" }, null, 2);
+  }
+
+  async function stimulateNeuron(neuronId = null) {
+    init3DConnectomeHost();
+    const modeEl = $("#conn-plasticity-mode");
+    const rpeEl = $("#conn-reward-slider");
+    const data = await api("/api/connectome/stimulate", {
+      method: "POST",
+      body: JSON.stringify({
+        organism_id: state.selectedOrganismId,
+        neuron_id: neuronId,
+        current: neuronId ? 1.45 : 1.25,
+        reward_signal: rpeEl ? Number(rpeEl.value) : 0.85,
+        learning_rate: 0.12,
+        plasticity_mode: modeEl ? modeEl.value : "neuromodulated",
+        structural_adapt: true,
+      }),
+    });
+    applyConnectomePayload(data, null);
+    if (data.stimulation) {
+      const s = data.stimulation;
+      announce(
+        `Stimulated ${s.stimulated_neuron} (${s.plasticity_mode}) · ${s.signals_emitted} live signals · ||ΔW||=${s.weight_delta_norm}`
+      );
+    }
+  }
+
+  async function runLivePlasticityStep() {
+    if (state.liveStepInFlight) return;
+    state.liveStepInFlight = true;
+    try {
+      init3DConnectomeHost();
+      const modeEl = $("#conn-plasticity-mode");
+      const rpeEl = $("#conn-reward-slider");
+      const data = await api("/api/connectome/plasticity-step", {
+        method: "POST",
+        body: JSON.stringify({
+          organism_id: state.selectedOrganismId,
+          steps: 1,
+          plasticity_mode: modeEl ? modeEl.value : "neuromodulated",
+          reward_override: state.manualRpeTouched && rpeEl ? Number(rpeEl.value) : null,
+        }),
+      });
+      applyConnectomePayload(data, null);
+      if (data.command_centre) {
+        const tickEl = $("#metric-tick");
+        if (tickEl && data.command_centre.tick !== undefined) {
+          tickEl.textContent = String(data.command_centre.tick);
+        }
+      }
+    } finally {
+      state.liveStepInFlight = false;
+    }
+  }
+
+  async function refreshConnectome(checkpointIdx = null) {
+    init3DConnectomeHost();
+    const params = new URLSearchParams();
+    if (state.selectedOrganismId) params.set("organism_id", state.selectedOrganismId);
+    if (checkpointIdx !== null && Number.isFinite(checkpointIdx)) {
+      params.set("checkpoint_index", String(checkpointIdx));
+    }
+    const qs = params.toString() ? `?${params.toString()}` : "";
+    const data = await api(`/api/connectome${qs}`);
+    applyConnectomePayload(data, checkpointIdx);
   }
 
   // View C: Memory Observatory

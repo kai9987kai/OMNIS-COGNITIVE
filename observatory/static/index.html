@@ -118,19 +118,40 @@
           <button type="button" id="btn-conn-zoom-in" class="btn btn-ghost">Zoom +</button>
           <button type="button" id="btn-conn-zoom-out" class="btn btn-ghost">Zoom −</button>
           <button type="button" id="btn-conn-reset-cam" class="btn btn-ghost">Reset View</button>
-          <label for="playback-slider" class="inline-label">Checkpoint Playback</label>
+          <label for="playback-slider" class="inline-label">Checkpoint</label>
           <input id="playback-slider" type="range" min="0" max="0" value="0">
+          <label for="conn-plasticity-mode" class="inline-label">Rule</label>
+          <select id="conn-plasticity-mode" class="compact-select" aria-label="Synaptic plasticity rule">
+            <option value="neuromodulated" selected>Neuromodulated (DA/ACh/NE)</option>
+            <option value="three_factor">Three-Factor (R-STDP)</option>
+            <option value="hybrid">Hybrid (Three-Factor + Hebbian)</option>
+            <option value="hebbian">Hebbian (Co-activation)</option>
+          </select>
+          <label for="conn-reward-slider" class="inline-label">RPE <output id="conn-reward-val" class="mono-inline">+0.85</output></label>
+          <input id="conn-reward-slider" type="range" min="-1.5" max="1.5" step="0.05" value="0.85" aria-label="Reward prediction error override">
+          <button type="button" id="btn-stimulate-conn" class="btn btn-primary">Pulse &amp; Induce Plasticity</button>
+          <button type="button" id="btn-live-plasticity" class="btn btn-ghost">Live Stream: OFF</button>
+          <button type="button" id="btn-toggle-signals" class="btn btn-ghost">Pause Pulses</button>
         </div>
       </div>
 
       <div class="connectome-layout">
-        <div class="glass-card canvas-stage">
+        <div id="connectome-canvas-stage" class="glass-card canvas-stage cv-auto-panel">
+          <div id="connectome-live-hud" class="connectome-hud" aria-label="Live connectome signal and plasticity telemetry">
+            <span class="hud-chip">Signals <strong id="hud-signals-count">0</strong></span>
+            <span class="hud-chip">||ΔW|| <strong id="hud-dw-norm">0.0000</strong></span>
+            <span class="hud-chip">LTP / LTD <strong id="hud-ltp-ltd">0 / 0</strong></span>
+            <span class="hud-chip">Neuromod <strong id="hud-neuromod">DA 0.00 · ACh 0.50 · NE 0.20</strong></span>
+            <span class="hud-chip">SynOps <strong id="hud-synops">0</strong></span>
+          </div>
           <div id="connectome-3d-container" class="three-host" aria-label="Interactive 3D neural connectome graph"></div>
           <div class="legend-bar">
-            <span><i class="dot dot-cyan"></i> Excitatory Synapse / Active</span>
-            <span><i class="dot dot-violet"></i> Inhibitory Synapse</span>
-            <span><i class="dot dot-amber"></i> Signal Pulse / Lesioned</span>
-            <span class="hint-text">Drag to orbit · Scroll to zoom · Click neuron to inspect</span>
+            <span><i class="dot dot-cyan"></i> Excitatory</span>
+            <span><i class="dot dot-violet"></i> Inhibitory</span>
+            <span><i class="dot dot-ltp"></i> LTP (ΔW&gt;0)</span>
+            <span><i class="dot dot-ltd"></i> LTD (ΔW&lt;0)</span>
+            <span><i class="dot dot-amber"></i> Live Signal Pulse</span>
+            <span class="hint-text">Drag to orbit · Scroll to zoom · Click neuron to inspect or pulse</span>
           </div>
         </div>
 
@@ -144,6 +165,30 @@
           <h3>Cognitive Pipeline State C_t</h3>
           <pre id="cognitive-state-pre" class="mono-pre"></pre>
         </aside>
+      </div>
+
+      <div class="oscilloscope-grid">
+        <div class="glass-card oscilloscope-card cv-auto-panel">
+          <div class="card-header-row">
+            <h3>Live Plasticity &amp; Neuromodulator Oscilloscope</h3>
+            <span id="oscilloscope-meta" class="mono-inline">Awaiting plasticity ticks</span>
+          </div>
+          <canvas id="plasticity-oscilloscope-canvas" class="oscilloscope-canvas" width="640" height="170" aria-label="Live plasticity delta-W norm and neuromodulator time series"></canvas>
+          <div class="legend-bar">
+            <span><i class="dot dot-cyan"></i> ||ΔW|| Norm</span>
+            <span><i class="dot dot-amber"></i> Dopamine (DA)</span>
+            <span><i class="dot dot-ltp"></i> Acetylcholine (ACh)</span>
+            <span><i class="dot dot-ltd"></i> Norepinephrine (NE)</span>
+          </div>
+        </div>
+
+        <div class="glass-card events-card cv-auto-panel">
+          <div class="card-header-row">
+            <h3>Live Synaptic Weight Changes (LTP/LTD) &amp; Structural Events</h3>
+            <span id="plasticity-mode-badge" class="mono-inline">Mode: three_factor</span>
+          </div>
+          <ul id="plasticity-events-list" class="mono-list" aria-live="polite"></ul>
+        </div>
       </div>
     </section>
 

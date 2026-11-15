@@ -17,6 +17,7 @@ from core.schemas import SCHEMA_VERSION
 from diamond.environment import DiamondWorld
 from genesis.lifecycle import DEVELOPMENTAL_STAGES
 from neurohive.organism import ArtificialOrganism
+from sonapse.connectome import VALID_PLASTICITY_MODES
 from sonapse.topology import analyze_topology
 
 
@@ -53,6 +54,25 @@ class TensorPassRequest(BaseModel):
 class AdvanceStageRequest(BaseModel):
     organism_id: Optional[str] = None
     target_stage: Optional[str] = None
+
+
+class StimulateConnectomeRequest(BaseModel):
+    organism_id: Optional[str] = Field(default=None)
+    neuron_id: Optional[str] = Field(default=None)
+    current: float = Field(default=1.25, ge=-3.0, le=5.0)
+    reward_signal: float = Field(default=0.85, ge=-2.0, le=2.0)
+    learning_rate: float = Field(default=0.12, ge=0.005, le=0.5)
+    plasticity_mode: Optional[str] = Field(default=None)
+    structural_adapt: bool = Field(default=True)
+
+
+class LivePlasticityStepRequest(BaseModel):
+    organism_id: Optional[str] = Field(default=None)
+    steps: int = Field(default=1, ge=1, le=20)
+    plasticity_mode: Optional[str] = Field(default=None)
+    reward_override: Optional[float] = Field(default=None, ge=-2.0, le=2.0)
+    learning_rate: Optional[float] = Field(default=None, ge=0.005, le=0.5)
+    stimulate_neuron_id: Optional[str] = Field(default=None)
 
 
 class DamageRequest(BaseModel):
@@ -154,6 +174,48 @@ def create_observatory_app(core: Optional[OmnisCore] = None) -> FastAPI:
         return {"task_id": omnis.world.task_id, "beacon": list(omnis.world.beacon)}
 
     # --- B. Connectome Explorer (3D Neural Graph & Topology) ---
+    def _apply_plasticity_mode(mode: Optional[str], org: ArtificialOrganism) -> str:
+        if mode is not None:
+            if mode not in VALID_PLASTICITY_MODES:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid plasticity_mode '{mode}'. Expected one of {VALID_PLASTICITY_MODES}",
+                )
+            omnis.config.plasticity_mode = mode
+            for organism in omnis.ecosystem.organisms.values():
+                organism.genome["plasticity_mode"] = mode
+        return str(org.genome.get("plasticity_mode", omnis.config.plasticity_mode))
+
+    def _connectome_payload(
+        org: ArtificialOrganism,
+        checkpoint_index: Optional[int] = None,
+        extra: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        target_conn = org.connectome
+        if (
+            checkpoint_index is not None
+            and 0 <= checkpoint_index < len(org.developmental_history)
+            and "connectome_snapshot" in org.developmental_history[checkpoint_index]
+        ):
+            from sonapse.connectome import SonapseConnectome
+
+            target_conn = SonapseConnectome.from_dict(
+                org.developmental_history[checkpoint_index]["connectome_snapshot"]
+            )
+        payload: Dict[str, Any] = {
+            "organism_id": org.organism_id,
+            "neuron_model": target_conn.neuron_model,
+            "plasticity_mode": org.genome.get("plasticity_mode", omnis.config.plasticity_mode),
+            "checkpoints_count": len(org.developmental_history),
+            "checkpoint_index": checkpoint_index,
+            "graph": target_conn.to_visualization_graph(),
+            "topology": analyze_topology(target_conn),
+            "cognitive_state": org.last_cognitive_state.model_dump() if org.last_cognitive_state else None,
+        }
+        if extra:
+            payload.update(extra)
+        return payload
+
     @api_router.get("/connectome")
     def get_connectome(
         organism_id: Optional[str] = Query(default=None),
@@ -162,27 +224,66 @@ def create_observatory_app(core: Optional[OmnisCore] = None) -> FastAPI:
         org = omnis.get_organism(organism_id)
         if org is None:
             raise HTTPException(status_code=404, detail="Organism not found")
-        target_conn = org.connectome
-        if (
-            checkpoint_index is not None
-            and 0 <= checkpoint_index < len(org.developmental_history)
-            and "connectome_snapshot" in org.developmental_history[checkpoint_index]
-        ):
-            from sonapse.connectome import SonapseConnectome
-            target_conn = SonapseConnectome.from_dict(
-                org.developmental_history[checkpoint_index]["connectome_snapshot"]
+        return _connectome_payload(org, checkpoint_index=checkpoint_index)
+
+    @api_router.post("/connectome/stimulate")
+    def stimulate_connectome(req: StimulateConnectomeRequest) -> Dict[str, Any]:
+        org = omnis.get_organism(req.organism_id)
+        if org is None:
+            raise HTTPException(status_code=404, detail="Organism not found")
+        eff_mode = _apply_plasticity_mode(req.plasticity_mode, org)
+        stimulation = org.connectome.stimulate_pathway(
+            neuron_id=req.neuron_id,
+            current=req.current,
+            reward_signal=req.reward_signal,
+            learning_rate=req.learning_rate,
+            mode=eff_mode,
+            structural_adapt=req.structural_adapt,
+        )
+        return _connectome_payload(org, extra={"stimulation": stimulation})
+
+    @api_router.post("/connectome/plasticity-step")
+    def live_plasticity_step(req: LivePlasticityStepRequest) -> Dict[str, Any]:
+        org = omnis.get_organism(req.organism_id)
+        if org is None:
+            raise HTTPException(status_code=404, detail="Organism not found")
+        eff_mode = _apply_plasticity_mode(req.plasticity_mode, org)
+        step_res = omnis.step(steps=req.steps)
+        org = omnis.get_organism(req.organism_id) or omnis.get_organism()
+        if org is None:
+            raise HTTPException(status_code=404, detail="Organism not found after simulation step")
+
+        stimulation: Optional[Dict[str, Any]] = None
+        if req.stimulate_neuron_id is not None:
+            stimulation = org.connectome.stimulate_pathway(
+                neuron_id=req.stimulate_neuron_id,
+                current=1.2,
+                reward_signal=req.reward_override if req.reward_override is not None else 0.85,
+                learning_rate=req.learning_rate if req.learning_rate is not None else 0.1,
+                mode=eff_mode,
+                structural_adapt=False,
             )
-        graph = target_conn.to_visualization_graph()
-        topology = analyze_topology(target_conn)
-        return {
-            "organism_id": org.organism_id,
-            "neuron_model": target_conn.neuron_model,
-            "checkpoints_count": len(org.developmental_history),
-            "checkpoint_index": checkpoint_index,
-            "graph": graph,
-            "topology": topology,
-            "cognitive_state": org.last_cognitive_state.model_dump() if org.last_cognitive_state else None,
-        }
+        elif req.reward_override is not None or req.learning_rate is not None:
+            hist_before = len(org.connectome.plasticity_history)
+            org.connectome.update_plasticity(
+                reward_prediction_error=float(req.reward_override if req.reward_override is not None else 0.65),
+                learning_rate=float(req.learning_rate if req.learning_rate is not None else 0.08),
+                mode=eff_mode,
+            )
+            if len(org.connectome.plasticity_history) > hist_before and hist_before > 0:
+                prev = org.connectome.plasticity_history[-2]
+                curr = org.connectome.plasticity_history[-1]
+                if prev.get("step") == curr.get("step"):
+                    org.connectome.plasticity_history.pop(-2)
+
+        return _connectome_payload(
+            org,
+            extra={
+                "step_result": step_res,
+                "stimulation": stimulation,
+                "command_centre": omnis.get_command_centre_status(),
+            },
+        )
 
     # --- C. Memory Observatory ---
     @api_router.get("/memory")

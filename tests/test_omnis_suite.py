@@ -632,3 +632,84 @@ def test_24_observatory_new_routes_and_all_12_package_protocols():
     assert client.post("/api/timeline/advance-stage", json={}).status_code == 200
     omnis.shutdown()
 
+
+# 25. Live connectome signals, neuromodulated plasticity, and stimulation API
+def test_25_live_signals_neuromodulated_plasticity_and_stimulation_api() -> None:
+    conn = SonapseConnectome(input_dim=4, hidden_dim=6, output_dim=4, seed=42)
+    stim = conn.stimulate_pathway(
+        current=1.35,
+        reward_signal=0.95,
+        learning_rate=0.14,
+        mode="neuromodulated",
+        structural_adapt=True,
+    )
+    assert stim["plasticity_mode"] == "neuromodulated"
+    assert stim["weight_delta_norm"] > 0.0
+    assert stim["signals_emitted"] > 0
+    for nm_key in ("dopamine", "acetylcholine", "norepinephrine", "serotonin"):
+        assert nm_key in stim["neuromodulators"]
+
+    assert len(conn.recent_signals) > 0
+    sig0 = conn.recent_signals[0]
+    assert {"pre_id", "post_id", "flux", "pre_role", "post_role"}.issubset(sig0.keys())
+    assert len(conn.recent_plasticity_events) > 0
+    ev0 = conn.recent_plasticity_events[0]
+    assert {"synapse_id", "dw", "weight", "kind"}.issubset(ev0.keys())
+    assert ev0["kind"] in ("LTP", "LTD")
+    assert len(conn.plasticity_history) >= 1
+    assert any(s.plasticity_trace > 0.0 for s in conn.synapses.values())
+
+    vis = conn.to_visualization_graph()
+    assert vis["last_weight_delta_norm"] > 0.0
+    assert len(vis["recent_plasticity_events"]) > 0
+    assert len(vis["plasticity_history"]) >= 1
+    assert any("last_dw" in e and "last_flux" in e and "plasticity_trace" in e for e in vis["edges"])
+
+    restored = SonapseConnectome.from_dict(conn.to_dict())
+    assert restored.neuromodulators == conn.neuromodulators
+    assert len(restored.plasticity_history) == len(conn.plasticity_history)
+    assert len(restored.recent_plasticity_events) == len(conn.recent_plasticity_events)
+
+    cfg = SystemConfig(
+        seed=42,
+        initial_population=4,
+        grid_width=8,
+        grid_height=8,
+        db_path=":memory:",
+    )
+    omnis = OmnisCore(cfg)
+    try:
+        client = TestClient(create_observatory_app(omnis))
+
+        bad_resp = client.post("/api/connectome/stimulate", json={"plasticity_mode": "invalid_mode"})
+        assert bad_resp.status_code == 400
+
+        stim_resp = client.post(
+            "/api/connectome/stimulate",
+            json={"plasticity_mode": "neuromodulated", "reward_signal": 0.9, "learning_rate": 0.12},
+        )
+        assert stim_resp.status_code == 200
+        stim_data = stim_resp.json()
+        assert stim_data["plasticity_mode"] == "neuromodulated"
+        assert omnis.config.plasticity_mode == "neuromodulated"
+        assert omnis.get_organism().genome["plasticity_mode"] == "neuromodulated"
+        assert stim_data["stimulation"]["weight_delta_norm"] > 0.0
+        assert len(stim_data["graph"]["recent_signals"]) > 0
+        assert len(stim_data["graph"]["recent_plasticity_events"]) > 0
+
+        tick_before = omnis.tick
+        live_resp = client.post(
+            "/api/connectome/plasticity-step",
+            json={"steps": 2, "plasticity_mode": "hybrid", "reward_override": -0.75},
+        )
+        assert live_resp.status_code == 200
+        live_data = live_resp.json()
+        assert live_data["plasticity_mode"] == "hybrid"
+        assert omnis.config.plasticity_mode == "hybrid"
+        assert omnis.get_organism().genome["plasticity_mode"] == "hybrid"
+        assert omnis.tick == tick_before + 2
+        assert len(live_data["graph"]["plasticity_history"]) >= 1
+        assert any(ev["kind"] == "LTD" for ev in live_data["graph"]["recent_plasticity_events"])
+    finally:
+        omnis.shutdown()
+

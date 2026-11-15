@@ -12,6 +12,7 @@ import numpy as np
 
 
 VALID_NEURON_MODELS = ("conventional", "rate_coded", "threshold", "lif")
+VALID_PLASTICITY_MODES = ("three_factor", "hebbian", "hybrid", "neuromodulated")
 
 
 @dataclass
@@ -69,6 +70,9 @@ class Synapse:
     consolidated_weight: float = 0.0
     fisher_importance: float = 0.0
     age: int = 0
+    last_dw: float = 0.0
+    last_flux: float = 0.0
+    plasticity_trace: float = 0.0
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -81,11 +85,27 @@ class Synapse:
             "consolidated_weight": float(self.consolidated_weight),
             "fisher_importance": float(self.fisher_importance),
             "age": int(self.age),
+            "last_dw": float(self.last_dw),
+            "last_flux": float(self.last_flux),
+            "plasticity_trace": float(self.plasticity_trace),
         }
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "Synapse":
-        return cls(**data)
+        return cls(
+            synapse_id=data["synapse_id"],
+            pre_id=data["pre_id"],
+            post_id=data["post_id"],
+            weight=float(data["weight"]),
+            eligibility=float(data.get("eligibility", 0.0)),
+            active=bool(data.get("active", True)),
+            consolidated_weight=float(data.get("consolidated_weight", 0.0)),
+            fisher_importance=float(data.get("fisher_importance", 0.0)),
+            age=int(data.get("age", 0)),
+            last_dw=float(data.get("last_dw", 0.0)),
+            last_flux=float(data.get("last_flux", 0.0)),
+            plasticity_trace=float(data.get("plasticity_trace", 0.0)),
+        )
 
 
 def activate_neuron(u_next: float, neuron_model: str, threshold: float = 0.5) -> Tuple[float, float]:
@@ -139,6 +159,14 @@ class SonapseConnectome:
         self.structural_events: List[Dict[str, Any]] = []
         self.last_weight_delta_norm: float = 0.0
         self.recent_signals: List[Dict[str, Any]] = []
+        self.neuromodulators: Dict[str, float] = {
+            "dopamine": 0.0,
+            "acetylcholine": 0.5,
+            "norepinephrine": 0.2,
+            "serotonin": 0.5,
+        }
+        self.recent_plasticity_events: List[Dict[str, Any]] = []
+        self.plasticity_history: List[Dict[str, Any]] = []
 
         if input_dim > 0 or hidden_dim > 0 or output_dim > 0:
             self._build_initial_architecture(input_dim, hidden_dim, output_dim)
@@ -313,6 +341,8 @@ class SonapseConnectome:
                     n.u, n.a = 0.0, 0.0
 
         # Accumulate and update in two phases: hidden neurons first (recurrent prev_a), then output neurons (feedforward a)
+        for syn in self.synapses.values():
+            syn.last_flux = 0.0
         active_syns = self.active_synapses()
         signals: List[Dict[str, Any]] = []
         outputs: Dict[str, float] = {}
@@ -331,14 +361,19 @@ class SonapseConnectome:
                 if abs(pre_a) > 1e-6:
                     self.total_synops += 1
                     flux = syn.weight * pre_a
+                    syn.last_flux = float(flux)
                     incoming_drive[syn.post_id] += flux
-                    if abs(flux) > 0.05 and len(signals) < 60:
+                    if abs(flux) > 0.02 and len(signals) < 80:
                         signals.append(
                             {
                                 "synapse_id": syn.synapse_id,
                                 "pre_id": syn.pre_id,
                                 "post_id": syn.post_id,
+                                "pre_role": pre_n.role,
+                                "post_role": post_n.role,
                                 "flux": round(flux, 4),
+                                "weight": round(syn.weight, 4),
+                                "excitatory": syn.weight >= 0,
                             }
                         )
                 syn.age += 1
@@ -374,12 +409,31 @@ class SonapseConnectome:
         ewc_lambda: float = 0.0,
         chosen_action: Optional[int] = None,
     ) -> float:
-        """Apply synaptic plasticity (with optional action-gated R-STDP) and return L2 norm of weight changes."""
+        """Apply synaptic plasticity (with optional action-gated R-STDP & neuromodulation) and return L2 norm of weight changes."""
         delta_sq_sum = 0.0
         eta = float(learning_rate)
         delta_t = float(reward_prediction_error)
         lam = float(reg_lambda)
         chosen_out_id = f"out_{int(chosen_action)}" if chosen_action is not None else None
+
+        da = math.tanh(delta_t * 1.5)
+        ne = min(1.0, abs(delta_t) * 0.9)
+        mean_act = sum(abs(n.a) for n in self.neurons.values() if n.active) / max(1, len(self.neurons))
+        ach = min(1.0, 0.25 + mean_act * 1.1)
+        ht = max(0.2, min(0.95, self.eligibility_decay))
+        self.neuromodulators = {
+            "dopamine": round(da, 4),
+            "acetylcholine": round(ach, 4),
+            "norepinephrine": round(ne, 4),
+            "serotonin": round(ht, 4),
+        }
+
+        for s in self.synapses.values():
+            s.last_dw = 0.0
+
+        ltp_count = 0
+        ltd_count = 0
+        plasticity_events: List[Dict[str, Any]] = []
 
         for syn in self.active_synapses():
             pre_n = self.neurons[syn.pre_id]
@@ -404,6 +458,10 @@ class SonapseConnectome:
                 dw = eta * (post_act * pre_act) - lam * syn.weight
             elif mode == "hybrid":
                 dw = eta * (0.7 * delta_t * syn.eligibility + 0.3 * post_act * pre_act) - lam * syn.weight
+            elif mode == "neuromodulated":
+                mod_gain = (1.0 + 0.5 * ach) * (da if abs(delta_t) > 1e-5 else 0.25)
+                homeostatic_pull = 0.02 * (0.35 - post_act) * pre_act
+                dw = eta * (mod_gain * syn.eligibility + homeostatic_pull) - lam * syn.weight
             else:
                 raise ValueError(f"Unsupported plasticity mode: {mode}")
 
@@ -414,9 +472,27 @@ class SonapseConnectome:
             new_w = max(-self.w_max, min(self.w_max, old_w + dw))
             syn.weight = new_w
             diff = new_w - old_w
+            syn.last_dw = float(diff)
+            syn.plasticity_trace = float(0.75 * syn.plasticity_trace + abs(diff))
             delta_sq_sum += diff * diff
+            if abs(diff) > 1e-5:
+                if diff >= 0.0:
+                    ltp_count += 1
+                else:
+                    ltd_count += 1
+                plasticity_events.append(
+                    {
+                        "synapse_id": syn.synapse_id,
+                        "pre_id": syn.pre_id,
+                        "post_id": syn.post_id,
+                        "dw": round(diff, 5),
+                        "weight": round(new_w, 4),
+                        "eligibility": round(syn.eligibility, 4),
+                        "kind": "LTP" if diff >= 0 else "LTD",
+                    }
+                )
 
-        if mode in ("three_factor", "hybrid"):
+        if mode in ("three_factor", "hybrid", "neuromodulated"):
             skip_deltas = [
                 ("in_0->out_1", eta),
                 ("in_0->out_3", -eta),
@@ -430,11 +506,85 @@ class SonapseConnectome:
                     new_w = max(-self.w_max, min(self.w_max, old_w + d_step))
                     syn.weight = new_w
                     diff = new_w - old_w
+                    syn.last_dw = float(diff)
+                    syn.plasticity_trace = float(0.75 * syn.plasticity_trace + abs(diff))
                     delta_sq_sum += diff * diff
 
         norm = math.sqrt(delta_sq_sum)
         self.last_weight_delta_norm = norm
+        plasticity_events.sort(key=lambda e: abs(e["dw"]), reverse=True)
+        self.recent_plasticity_events = plasticity_events[:30]
+        self.plasticity_history.append(
+            {
+                "step": self.step_count,
+                "weight_delta_norm": round(norm, 5),
+                "ltp_count": ltp_count,
+                "ltd_count": ltd_count,
+                "dopamine": self.neuromodulators["dopamine"],
+                "acetylcholine": self.neuromodulators["acetylcholine"],
+                "norepinephrine": self.neuromodulators["norepinephrine"],
+                "active_synapses": len(self.active_synapses()),
+            }
+        )
+        if len(self.plasticity_history) > 50:
+            self.plasticity_history = self.plasticity_history[-50:]
         return norm
+
+    def stimulate_pathway(
+        self,
+        neuron_id: Optional[str] = None,
+        current: float = 1.2,
+        reward_signal: float = 0.85,
+        learning_rate: float = 0.12,
+        mode: str = "neuromodulated",
+        structural_adapt: bool = True,
+    ) -> Dict[str, Any]:
+        """Inject sensory or localized neural current, propagate live signals, and induce synaptic plasticity."""
+        input_neurons = sorted((nid for nid, n in self.neurons.items() if n.role == "input"))
+        sensory: Dict[str, float] = {
+            nid: round(0.45 + 0.40 * math.sin(self.step_count * 0.6 + idx * 0.9), 4)
+            for idx, nid in enumerate(input_neurons)
+        }
+        stimulated = neuron_id if (neuron_id and neuron_id in self.neurons and self.neurons[neuron_id].active) else None
+        if stimulated is not None:
+            target_n = self.neurons[stimulated]
+            if target_n.role == "input":
+                sensory[stimulated] = float(current)
+            else:
+                target_n.u += float(current)
+
+        outputs = self.step(sensory)
+        chosen_action = 0
+        if outputs:
+            best_out = max(outputs.items(), key=lambda kv: kv[1])[0]
+            try:
+                chosen_action = int(best_out.split("_")[-1])
+            except (ValueError, IndexError):
+                chosen_action = 0
+
+        eff_mode = mode if mode in VALID_PLASTICITY_MODES else "neuromodulated"
+        norm = self.update_plasticity(
+            reward_prediction_error=float(reward_signal),
+            learning_rate=float(learning_rate),
+            mode=eff_mode,
+            chosen_action=chosen_action,
+        )
+        grown = 0
+        pruned = 0
+        if structural_adapt:
+            grown = self.grow_connections(max_new=2)
+            pruned = self.prune_weak_connections(min_weight=0.015)
+
+        return {
+            "stimulated_neuron": stimulated or "sensory_bank",
+            "chosen_action": chosen_action,
+            "plasticity_mode": eff_mode,
+            "weight_delta_norm": round(norm, 5),
+            "grown_synapses": grown,
+            "pruned_synapses": pruned,
+            "signals_emitted": len(self.recent_signals),
+            "neuromodulators": dict(self.neuromodulators),
+        }
 
     def consolidate_ewc(self) -> None:
         """Anchor weights and accumulate Fisher importance proxy for continual learning."""
@@ -578,6 +728,10 @@ class SonapseConnectome:
                 "target": s.post_id,
                 "weight": round(s.weight, 4),
                 "eligibility": round(s.eligibility, 4),
+                "last_dw": round(s.last_dw, 6),
+                "last_flux": round(s.last_flux, 5),
+                "plasticity_trace": round(s.plasticity_trace, 5),
+                "age": s.age,
                 "active": s.active,
                 "excitatory": s.weight >= 0,
             }
@@ -587,9 +741,13 @@ class SonapseConnectome:
             "step_count": self.step_count,
             "total_synops": self.total_synops,
             "density": round(self.current_density(), 5),
+            "last_weight_delta_norm": round(self.last_weight_delta_norm, 6),
+            "neuromodulators": {k: round(float(v), 4) for k, v in self.neuromodulators.items()},
             "nodes": nodes,
             "edges": edges,
             "recent_signals": self.recent_signals,
+            "recent_plasticity_events": self.recent_plasticity_events[-30:],
+            "plasticity_history": self.plasticity_history[-50:],
             "structural_events": self.structural_events[-25:],
         }
 
@@ -605,6 +763,9 @@ class SonapseConnectome:
             "step_count": self.step_count,
             "total_synops": self.total_synops,
             "last_weight_delta_norm": self.last_weight_delta_norm,
+            "neuromodulators": dict(self.neuromodulators),
+            "recent_plasticity_events": list(self.recent_plasticity_events[-30:]),
+            "plasticity_history": list(self.plasticity_history[-50:]),
             "neurons": {nid: n.to_dict() for nid, n in self.neurons.items()},
             "synapses": {sid: s.to_dict() for sid, s in self.synapses.items()},
             "structural_events": self.structural_events[-100:],
@@ -627,6 +788,10 @@ class SonapseConnectome:
         conn.step_count = int(data.get("step_count", 0))
         conn.total_synops = int(data.get("total_synops", 0))
         conn.last_weight_delta_norm = float(data.get("last_weight_delta_norm", 0.0))
+        if "neuromodulators" in data and isinstance(data["neuromodulators"], dict):
+            conn.neuromodulators.update({k: float(v) for k, v in data["neuromodulators"].items()})
+        conn.recent_plasticity_events = list(data.get("recent_plasticity_events", []))
+        conn.plasticity_history = list(data.get("plasticity_history", []))
         conn.neurons = {nid: Neuron.from_dict(nd) for nid, nd in data["neurons"].items()}
         conn.synapses = {sid: Synapse.from_dict(sd) for sid, sd in data["synapses"].items()}
         conn.structural_events = list(data.get("structural_events", []))
