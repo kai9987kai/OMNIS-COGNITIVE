@@ -6,7 +6,7 @@ import math
 from typing import Any, Dict, List, Optional
 
 from core.events import EventBus
-from core.governance import GovernanceManager
+from core.governance import GovernanceManager, TesseraLibrary
 from diamond.environment import DiamondWorld
 from mnemorph.memory import MemoryClass
 from neurohive.organism import ArtificialOrganism
@@ -29,6 +29,7 @@ class NeuroHiveEcosystem:
         self.organisms: Dict[str, ArtificialOrganism] = {}
         self.social_events: List[Dict[str, Any]] = []
         self.tick: int = 0
+        self.tessera = governance.tessera if governance is not None else TesseraLibrary()
 
     def add_organism(self, organism: ArtificialOrganism) -> bool:
         """Register organism in ecosystem and DIAMOND world, respecting population cap."""
@@ -154,6 +155,7 @@ class NeuroHiveEcosystem:
 
         self._process_social_interactions()
         self._assign_species()
+        self.tessera.scan_population(list(self.organisms.values()))
         dead_ids = self.remove_dead_organisms()
 
         return {
@@ -170,16 +172,39 @@ class NeuroHiveEcosystem:
 
     def get_population_summary(self) -> Dict[str, Any]:
         species_counts: Dict[str, int] = {}
+        trophic_guilds: Dict[str, int] = {
+            "autotroph_synthesizer": 0,
+            "forager_herbivore": 0,
+            "cooperative_symbiont": 0,
+        }
         fitness_values: List[float] = []
         for o in self.organisms.values():
             species_counts[o.species_id] = species_counts.get(o.species_id, 0) + 1
             fitness_values.append(round(o.fitness, 4))
+            model = o.genome.get("neuron_model", "rate_coded")
+            if model in ("dual_soma", "liquid_ltc"):
+                trophic_guilds["cooperative_symbiont"] += 1
+            elif len(o.connectome.active_synapses()) >= 42:
+                trophic_guilds["autotroph_synthesizer"] += 1
+            else:
+                trophic_guilds["forager_herbivore"] += 1
+
+        total_orgs = max(1, len(self.organisms))
+        shannon_div = -sum(
+            (cnt / float(total_orgs)) * math.log2(cnt / float(total_orgs))
+            for cnt in species_counts.values()
+            if cnt > 0
+        )
+        self.tessera.scan_population(list(self.organisms.values()))
         return {
             "tick": self.tick,
             "population_size": len(self.organisms),
             "max_population": self.governance.quotas.max_population_size if self.governance else self.max_population,
             "mean_fitness": round(self.mean_fitness(), 4),
             "species_counts": species_counts,
+            "species_diversity_index": round(float(shannon_div), 4),
+            "trophic_guilds": trophic_guilds,
+            "tessera_library": self.tessera.get_summary(),
             "fitness_distribution": fitness_values,
             "organisms": [o.get_summary() for o in self.organisms.values()],
             "recent_social_events": self.social_events[-20:],

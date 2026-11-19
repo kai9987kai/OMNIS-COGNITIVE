@@ -74,6 +74,8 @@ class GovernanceManager:
         self.quotas = quotas
         self.db = db
         self.event_bus = event_bus
+        self.crosswire = CrosswireSafetyContractVerifier()
+        self.tessera = TesseraLibrary()
 
     def record_audit(self, actor: str, action: str, details: Dict[str, Any]) -> None:
         ts = utc_now_iso()
@@ -151,14 +153,155 @@ class GovernanceManager:
                     raise ValueError(f"{k} must be in [0.01, 1.0]")
                 cleaned[k] = val
             elif k == "plasticity_mode":
-                if v not in ("three_factor", "hebbian", "hybrid"):
+                if v not in ("three_factor", "hebbian", "hybrid", "neuromodulated"):
                     raise ValueError(f"Invalid plasticity_mode: {v}")
                 cleaned[k] = v
             elif k == "default_neuron_model":
-                if v not in ("conventional", "rate_coded", "threshold", "lif"):
+                if v not in ("conventional", "rate_coded", "threshold", "lif", "dual_soma", "liquid_ltc"):
                     raise ValueError(f"Invalid default_neuron_model: {v}")
                 cleaned[k] = v
         return cleaned
+
+
+class CrosswireSafetyContractVerifier:
+    """CROSSWIRE finite-state Mealy transducer safety contract verifier across all surviving candidate interpretations."""
+
+    MEALY_STATES = ("S0_NOMINAL", "S1_RESOURCE_ALIGNED", "S2_HAZARD_PROXIMATE", "S3_LOW_ENERGY")
+
+    def verify_organism_contract(self, organism: Any) -> Dict[str, Any]:
+        conn = getattr(organism, "connectome", None)
+        num_neurons = len(conn.neurons) if conn else 0
+        num_synapses = len(conn.active_synapses()) if conn else 0
+        density = conn.current_density() if conn else 0.0
+        max_w = max((abs(s.weight) for s in conn.active_synapses()), default=0.0) if conn else 0.0
+
+        # Evaluate 4 candidate Mealy transducer interpretations over sensorimotor probes
+        probe_specs = [
+            ("I1_DIRECT_FORAGING", [0.7, 0.0, 0.8, -0.5, 0.0, 0.1, 0.4, 0.85]),
+            ("I2_HAZARD_EVASION", [0.1, 0.1, 0.2, 0.8, 0.0, 0.92, 0.0, 0.70]),
+            ("I3_LOW_ENERGY_HOMEOSTASIS", [0.6, 0.4, 0.9, -0.4, -0.4, 0.15, 0.3, 0.18]),
+            ("I4_BOUNDED_PLASTICITY_DENSITY", [0.0, -0.7, 0.75, 0.2, 0.5, 0.25, -0.5, 0.65]),
+        ]
+
+        surviving_adapters: List[Dict[str, Any]] = []
+        all_passed = True
+        for interp_id, probe_vec in probe_specs:
+            probe_conn = copy.deepcopy(conn) if conn is not None else None
+            out_map = probe_conn.step(probe_vec) if probe_conn is not None else {"out_0": 0.0}
+            out_vals = list(out_map.values())
+            finite_outputs = all(abs(float(v)) <= 20.0 for v in out_vals)
+            bounded_structure = density <= (conn.max_density + 1e-6 if conn else 0.35) and max_w <= (conn.w_max + 1e-6 if conn else 2.5)
+            contract_ok = bool(finite_outputs and bounded_structure)
+            if not contract_ok:
+                all_passed = False
+            best_out = max(out_map.items(), key=lambda kv: kv[1])[0] if out_map else "out_0"
+            surviving_adapters.append(
+                {
+                    "interpretation_id": interp_id,
+                    "mealy_transition": f"{self.MEALY_STATES[len(surviving_adapters) % 4]} -> {best_out}",
+                    "contract_satisfied": contract_ok,
+                    "max_output_magnitude": round(max((abs(float(v)) for v in out_vals), default=0.0), 4),
+                }
+            )
+
+        manifest_bytes = json.dumps(surviving_adapters, sort_keys=True).encode("utf-8")
+        return {
+            "protocol": "CROSSWIRE Mealy Transducer Safety Contract",
+            "organism_id": getattr(organism, "organism_id", "unknown"),
+            "surviving_interpretations": len(surviving_adapters),
+            "admitted_for_deployment": all_passed,
+            "verdict": "ADMITTED_ALL_INTERPRETATIONS_SAFE" if all_passed else "REJECTED_CONTRACT_VIOLATION",
+            "structural_bounds": {
+                "neurons": num_neurons,
+                "active_synapses": num_synapses,
+                "density": round(float(density), 4),
+                "max_abs_weight": round(float(max_w), 4),
+            },
+            "contract_sha256": hashlib.sha256(manifest_bytes).hexdigest()[:16],
+            "adapters": surviving_adapters,
+        }
+
+
+class TesseraLibrary:
+    """TESSERA independent-rediscovery shared instruction & circuit motif repository."""
+
+    def __init__(self, min_independent_discoverers: int = 2) -> None:
+        self.min_independent_discoverers = max(2, int(min_independent_discoverers))
+        self.candidate_motifs: Dict[str, Dict[str, Any]] = {}
+        self.published_instructions: Dict[str, Dict[str, Any]] = {}
+
+    def observe_organism_motifs(self, organism: Any) -> List[str]:
+        conn = getattr(organism, "connectome", None)
+        if conn is None:
+            return []
+        oid = getattr(organism, "organism_id", "org_unknown")
+        lineage_root = (getattr(organism, "parent_ids", None) or [oid])[0]
+
+        discovered: List[Tuple[str, str, Dict[str, float]]] = []
+        syns = conn.synapses
+        if "in_0->out_1" in syns and syns["in_0->out_1"].weight > 0.08:
+            discovered.append(("TESSERA_EAST_GRADIENT_PURSUIT", "Direct east resource pursuit reflex", {"in_0->out_1": round(syns["in_0->out_1"].weight, 4)}))
+        if "in_1->out_2" in syns and syns["in_1->out_2"].weight > 0.08:
+            discovered.append(("TESSERA_SOUTH_GRADIENT_PURSUIT", "Direct south resource pursuit reflex", {"in_1->out_2": round(syns["in_1->out_2"].weight, 4)}))
+        if any(getattr(s, "is_graft", False) for s in conn.active_synapses()):
+            discovered.append(("TESSERA_NEUROGRAFT_BRIDGE", "Cross-cluster axonal routing bridge", {"graft_boost": 0.32}))
+        if conn.neuron_model in ("dual_soma", "liquid_ltc"):
+            discovered.append((f"TESSERA_{conn.neuron_model.upper()}_RESONATOR", f"Multi-compartment {conn.neuron_model} gating motif", {"soma_gain": 0.65}))
+        if len(conn.active_synapses()) >= 40:
+            discovered.append(("TESSERA_DENSE_RECURRENT_CORE", "Recurrent multi-path working memory loop", {"density": round(conn.current_density(), 4)}))
+
+        newly_published: List[str] = []
+        for motif_id, desc, template in discovered:
+            entry = self.candidate_motifs.setdefault(
+                motif_id,
+                {
+                    "motif_id": motif_id,
+                    "description": desc,
+                    "discoverers": set(),
+                    "independent_lineages": set(),
+                    "template": template,
+                    "published": False,
+                },
+            )
+            entry["discoverers"].add(oid)
+            entry["independent_lineages"].add(lineage_root)
+            if len(entry["discoverers"]) >= self.min_independent_discoverers and not entry["published"]:
+                entry["published"] = True
+                self.published_instructions[motif_id] = {
+                    "motif_id": motif_id,
+                    "description": desc,
+                    "discoverer_count": len(entry["discoverers"]),
+                    "independent_lineage_count": len(entry["independent_lineages"]),
+                    "template": template,
+                }
+                newly_published.append(motif_id)
+            elif entry["published"] and motif_id in self.published_instructions:
+                self.published_instructions[motif_id]["discoverer_count"] = len(entry["discoverers"])
+                self.published_instructions[motif_id]["independent_lineage_count"] = len(entry["independent_lineages"])
+        return newly_published
+
+    def scan_population(self, organisms: List[Any]) -> Dict[str, Any]:
+        for org in organisms:
+            self.observe_organism_motifs(org)
+        return self.get_summary()
+
+    def get_summary(self) -> Dict[str, Any]:
+        return {
+            "protocol": "TESSERA Independent Rediscovery Gate",
+            "min_independent_discoverers": self.min_independent_discoverers,
+            "candidate_count": len(self.candidate_motifs),
+            "published_count": len(self.published_instructions),
+            "published_instructions": list(self.published_instructions.values()),
+            "candidates": [
+                {
+                    "motif_id": m["motif_id"],
+                    "description": m["description"],
+                    "discoverer_count": len(m["discoverers"]),
+                    "published": bool(m["published"]),
+                }
+                for m in self.candidate_motifs.values()
+            ],
+        }
 
 
 class SelfImprovementEngine:

@@ -823,3 +823,58 @@ def test_26_kai_ecosystem_innovations_dual_soma_rrf_carrier_tether_hyperion() ->
     finally:
         omnis.shutdown()
 
+
+# 27. CROSSWIRE Mealy safety contract, TESSERA rediscovery, COUNTERFORM system-ID, MOLT trace placement, and CableLab morphology
+def test_27_crosswire_tessera_counterform_molt_cablelab_and_trophic_ecology() -> None:
+    cfg = SystemConfig(seed=42, initial_population=4, grid_width=8, grid_height=8, db_path=":memory:")
+    omnis = OmnisCore(cfg)
+    try:
+        # 1. Governance patch accepts neuromodulated, dual_soma, liquid_ltc
+        patch = omnis.governance.validate_config_patch(
+            {"plasticity_mode": "neuromodulated", "default_neuron_model": "dual_soma"}
+        )
+        assert patch["plasticity_mode"] == "neuromodulated"
+        assert patch["default_neuron_model"] == "dual_soma"
+
+        # 2. SYNAPSE-ATLAS & NeuroPulse-CableLab physical morphology metrics
+        lead = omnis.get_organism()
+        assert lead is not None
+        topo = analyze_topology(lead.connectome)
+        assert topo["total_wiring_length"] > 0.0
+        assert topo["wiring_economy_efficiency"] > 0.0
+        assert topo["mean_cable_delay_ms"] > 0.0
+
+        # 3. TESSERA independent rediscovery & Evo-OMEGA trophic ecology
+        omnis.step(steps=2)
+        for org in omnis.ecosystem.organisms.values():
+            org.connectome.inject_neurograft(max_grafts=2)
+        pop_summary = omnis.ecosystem.get_population_summary()
+        assert "trophic_guilds" in pop_summary
+        assert "species_diversity_index" in pop_summary
+        assert pop_summary["tessera_library"]["published_count"] >= 1
+
+        # 4. COUNTERFORM competing physical-law system ID & tuned absorber
+        cf = omnis.world.run_counterform_system_id(horizon=20)
+        assert cf["winning_law"] == "LAW_2_DAMPED_DRIVEN_OSCILLATOR"
+        assert cf["tuned_absorber"]["attenuation_db"] > 5.0
+        assert len(cf["receipt_sha256"]) == 16
+
+        # 5. CROSSWIRE Mealy transducer safety contract verification
+        cw = omnis.governance.crosswire.verify_organism_contract(lead)
+        assert cw["admitted_for_deployment"] is True
+        assert cw["surviving_interpretations"] == 4
+
+        # 6. MOLT trace-placement vs. tissue-loss, regrowth & world-shift assay
+        molt = omnis.morpheus.run_molt_trace_placement_assay(lead, omnis.world, lesion_ratio=0.35)
+        assert molt["best_trace_placement"] in molt["placements"]
+        assert len(molt["placements"]) == 3
+
+        # 7. Observatory API endpoints for all new capabilities
+        client = TestClient(create_observatory_app(omnis))
+        assert client.post("/api/ecosystem/tessera-discover").status_code == 200
+        assert client.post("/api/world/counterform-id").status_code == 200
+        assert client.post("/api/governance/crosswire-verify").status_code == 200
+        assert client.post("/api/morpheus/molt-assay").status_code == 200
+    finally:
+        omnis.shutdown()
+

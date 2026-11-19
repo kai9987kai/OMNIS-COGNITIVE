@@ -274,3 +274,66 @@ class MorpheusRegenerator:
             "fault_report": fault_report,
             "recovery_curve": recovery_curve,
         }
+
+    def run_molt_trace_placement_assay(
+        self,
+        organism: ArtificialOrganism,
+        world: DiamondWorld,
+        lesion_ratio: float = 0.35,
+    ) -> Dict[str, Any]:
+        """MOLT assay: evaluate how cue-trace placement affects behavior after tissue loss, regrowth, and a world shift."""
+        base_state = world.save_state()
+        shifted_world = DiamondWorld(width=base_state["width"], height=base_state["height"])
+        shifted_world.load_state(base_state)
+        shifted_world.set_task(1 - int(base_state.get("task_id", 0) % 2))
+        shifted_state = shifted_world.save_state()
+
+        placements = [
+            "deep_recurrent_core",
+            "peripheral_sensorimotor_graft",
+            "distributed_mnemorph_hybrid",
+        ]
+        results: Dict[str, Dict[str, float]] = {}
+
+        for placement in placements:
+            clone = copy.deepcopy(organism)
+            if placement == "deep_recurrent_core":
+                # Zero out direct sensorimotor skip bridges so trace lives only in deep hidden tissue
+                for sid, syn in clone.connectome.synapses.items():
+                    if syn.pre_id.startswith("in_") and syn.post_id.startswith("out_"):
+                        syn.weight = 0.0
+                        syn.is_graft = False
+            elif placement == "peripheral_sensorimotor_graft":
+                clone.connectome.inject_neurograft(max_grafts=4)
+            else:
+                clone.connectome.inject_neurograft(max_grafts=4)
+                clone.connectome.consolidate_ewc()
+                clone.memory.consolidate()
+
+            p_pre = max(1e-6, self.evaluate_performance(clone, base_state, steps=10)["performance"])
+            self.introduce_damage(clone, neuron_lesion_ratio=lesion_ratio, synapse_sever_ratio=lesion_ratio)
+            p_lesioned = self.evaluate_performance(clone, base_state, steps=10)["performance"]
+
+            rehab_w = DiamondWorld(width=shifted_state["width"], height=shifted_state["height"])
+            rehab_w.load_state(shifted_state)
+            rehab_w.register_agent(clone.organism_id, energy=120.0)
+            self.regenerate_step(clone, world=rehab_w, learning_steps=6)
+            if placement == "distributed_mnemorph_hybrid":
+                clone.connectome.inject_neurograft(max_grafts=3)
+
+            p_shifted = self.evaluate_performance(clone, shifted_state, steps=10)["performance"]
+            results[placement] = {
+                "pre_lesion_performance": round(float(p_pre), 4),
+                "post_lesion_performance": round(float(p_lesioned), 4),
+                "post_regrowth_world_shift_performance": round(float(p_shifted), 4),
+                "transfer_retention_ratio": round(float(p_shifted / p_pre), 4),
+            }
+
+        best_placement = max(results.items(), key=lambda kv: kv[1]["transfer_retention_ratio"])[0]
+        return {
+            "protocol": "MOLT Trace-Placement vs. Tissue-Loss, Regrowth & World-Shift Assay",
+            "organism_id": organism.organism_id,
+            "lesion_ratio": round(float(lesion_ratio), 3),
+            "best_trace_placement": best_placement,
+            "placements": results,
+        }

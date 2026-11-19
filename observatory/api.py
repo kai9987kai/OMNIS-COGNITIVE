@@ -404,10 +404,18 @@ def create_observatory_app(core: Optional[OmnisCore] = None) -> FastAPI:
         summary = omnis.run_evolution_cycle()
         return {"evolution": summary, "ecosystem": omnis.ecosystem.get_population_summary()}
 
+    @api_router.post("/ecosystem/tessera-discover")
+    def run_tessera_discovery() -> Dict[str, Any]:
+        return omnis.ecosystem.tessera.scan_population(list(omnis.ecosystem.organisms.values()))
+
     # --- E. World Simulator ---
     @api_router.get("/world")
     def get_world() -> Dict[str, Any]:
         return omnis.world.get_observatory_view()
+
+    @api_router.post("/world/counterform-id")
+    def run_world_counterform_id() -> Dict[str, Any]:
+        return omnis.world.run_counterform_system_id(horizon=24)
 
     # --- F. Research Laboratory & Self-Improvement ---
     @api_router.get("/research")
@@ -571,6 +579,20 @@ def create_observatory_app(core: Optional[OmnisCore] = None) -> FastAPI:
             )
         except ValueError as exc:
             raise HTTPException(status_code=404, detail=str(exc))
+
+    @api_router.post("/morpheus/molt-assay")
+    def run_morpheus_molt_assay(organism_id: Optional[str] = Query(default=None)) -> Dict[str, Any]:
+        org = omnis.get_organism(organism_id)
+        if org is None:
+            raise HTTPException(status_code=404, detail="Organism not found")
+        return omnis.morpheus.run_molt_trace_placement_assay(org, omnis.world, lesion_ratio=0.35)
+
+    @api_router.post("/governance/crosswire-verify")
+    def run_crosswire_safety_verify(organism_id: Optional[str] = Query(default=None)) -> Dict[str, Any]:
+        org = omnis.get_organism(organism_id)
+        if org is None:
+            raise HTTPException(status_code=404, detail="Organism not found")
+        return omnis.governance.crosswire.verify_organism_contract(org)
 
     @api_router.get("/events")
     def get_events(limit: int = Query(default=50, ge=1, le=500)) -> Dict[str, Any]:

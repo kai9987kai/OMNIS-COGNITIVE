@@ -836,6 +836,8 @@
       ["Effective Info EI", Number(t.effective_information_macro || 0).toFixed(3)],
       ["Fractal Dim D_f", Number(t.fractal_dimension_proxy || 1.0).toFixed(3)],
       ["NeuroGrafts", t.graft_synapses ?? 0],
+      ["Wiring Len L", Number(t.total_wiring_length || 0).toFixed(1)],
+      ["Cable Delay", `${Number(t.mean_cable_delay_ms || 0).toFixed(2)} ms`],
     ]);
 
     $("#cognitive-state-pre").textContent = JSON.stringify(data.cognitive_state || { note: "Step simulation to populate C_t" }, null, 2);
@@ -1187,8 +1189,27 @@
       .map((ev) => `<li>[t=${ev.tick}] ${escapeHtml(ev.type)} · ${escapeHtml(JSON.stringify(ev))}</li>`)
       .join("") || "<li>No cooperation/competition events recorded yet.</li>";
 
+    const tBox = $("#tessera-library-box");
+    if (tBox) {
+      const tl = eco.tessera_library || {};
+      const tg = eco.trophic_guilds || {};
+      const pubs = (tl.published_instructions || [])
+        .map((p) => `${p.motif_id} (discoverers=${p.discoverer_count}, lineages=${p.independent_lineage_count})`)
+        .join(" · ") || "None yet";
+      tBox.innerHTML =
+        `<strong>${escapeHtml(tl.protocol || "TESSERA")}</strong> · Published Instructions: <strong>${tl.published_count ?? 0}</strong> / ${tl.candidate_count ?? 0} candidates · Species Diversity H=${eco.species_diversity_index ?? 0}<br>` +
+        `Evo-OMEGA Trophic Guilds: Autotrophs=${tg.autotroph_synthesizer ?? 0} · Foragers=${tg.forager_herbivore ?? 0} · Symbionts=${tg.cooperative_symbiont ?? 0}<br>` +
+        `Published Set: ${escapeHtml(pubs)}`;
+    }
+
     drawLineageTree(eco.lineage || []);
   }
+
+  $("#btn-tessera-scan")?.addEventListener("click", async () => {
+    const res = await api("/api/ecosystem/tessera-discover", { method: "POST" });
+    await refreshALife();
+    announce(`TESSERA independent-rediscovery scan completed (${res.published_count} published instructions).`);
+  });
 
   // View E: World Simulator
   $("#btn-task-0").addEventListener("click", async () => {
@@ -1201,6 +1222,22 @@
     await api("/api/world/task", { method: "POST", body: JSON.stringify({ task_id: 1 }) });
     await refreshWorld();
     announce("DIAMOND switched to Task 1 (Shifted Beacon).");
+  });
+
+  $("#btn-counterform-id")?.addEventListener("click", async () => {
+    const res = await api("/api/world/counterform-id", { method: "POST" });
+    const box = $("#counterform-box");
+    if (box) {
+      const ab = res.tuned_absorber || {};
+      const laws = (res.competing_laws || [])
+        .map((l) => `${l.law_id} (RMSE=${l.held_out_rmse})`)
+        .join(" · ");
+      box.innerHTML =
+        `<strong>${escapeHtml(res.protocol)}</strong> · Winner: <strong>${escapeHtml(res.winning_law)}</strong> [${escapeHtml(res.winning_equation)}]<br>` +
+        `Tuned Absorber: f_opt=${ab.frequency_ratio_f_opt} · ζ_opt=${ab.damping_ratio_zeta_opt} · Peak ${ab.peak_amplitude_before} → ${ab.peak_amplitude_after} (-${ab.attenuation_db} dB)<br>` +
+        `Competing Laws: ${escapeHtml(laws)} · Receipt SHA-256: <code>${escapeHtml(res.receipt_sha256)}</code>`;
+    }
+    announce(`COUNTERFORM identified ${res.winning_law} (attenuation ${res.tuned_absorber?.attenuation_db} dB).`);
   });
 
   async function refreshWorld() {
@@ -1313,6 +1350,21 @@
     await api("/api/research/self-improve/propose", { method: "POST" });
     await refreshResearch();
     announce("Self-improvement proposal evaluated in sandbox.");
+  });
+
+  $("#btn-crosswire-verify")?.addEventListener("click", async () => {
+    const qs = state.selectedOrganismId ? `?organism_id=${encodeURIComponent(state.selectedOrganismId)}` : "";
+    const res = await api(`/api/governance/crosswire-verify${qs}`, { method: "POST" });
+    const box = $("#proposals-box");
+    if (box) {
+      const adapters = (res.adapters || [])
+        .map((a) => `${a.interpretation_id}: ${a.mealy_transition} (ok=${a.contract_satisfied})`)
+        .join(" · ");
+      box.innerHTML =
+        `<strong>${escapeHtml(res.protocol)}</strong> · Verdict: <strong>${escapeHtml(res.verdict)}</strong> (SHA-256: <code>${escapeHtml(res.contract_sha256)}</code>)<br>` +
+        `Surviving Interpretations (${res.surviving_interpretations}): ${escapeHtml(adapters)}`;
+    }
+    announce(`CROSSWIRE safety contract verification: ${res.verdict}.`);
   });
 
   $("#btn-export-research").addEventListener("click", () => {
@@ -1550,6 +1602,22 @@
       `Before=${res.performance_before} · Damaged=${res.performance_damaged} · After=${res.performance_after} · Recovery(t)=${res.final_recovery_ratio}`;
     await refreshTimeline();
     announce(`Morpheus damage & recovery complete (Recovery ratio ${res.final_recovery_ratio}).`);
+  });
+
+  $("#btn-molt-assay")?.addEventListener("click", async () => {
+    const qs = state.selectedOrganismId ? `?organism_id=${encodeURIComponent(state.selectedOrganismId)}` : "";
+    const res = await api(`/api/morpheus/molt-assay${qs}`, { method: "POST" });
+    const box = $("#molt-assay-box");
+    if (box) {
+      const p = res.placements || {};
+      const rows = Object.entries(p)
+        .map(([k, v]) => `${k}: pre=${v.pre_lesion_performance} → lesion=${v.post_lesion_performance} → regrowth+shift=${v.post_regrowth_world_shift_performance} (ret=${v.transfer_retention_ratio})`)
+        .join("<br>");
+      box.innerHTML =
+        `<strong>${escapeHtml(res.protocol)}</strong> · Best Placement: <strong>${escapeHtml(res.best_trace_placement)}</strong><br>` +
+        rows;
+    }
+    announce(`MOLT trace-placement assay complete (best placement: ${res.best_trace_placement}).`);
   });
 
   function drawRecoveryCurve(curve) {

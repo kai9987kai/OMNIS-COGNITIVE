@@ -49,6 +49,9 @@ def analyze_topology(connectome: SonapseConnectome) -> Dict[str, Any]:
             "causal_emergence_index": 0.0,
             "fractal_dimension_proxy": 0.0,
             "graft_synapses": 0,
+            "total_wiring_length": 0.0,
+            "wiring_economy_efficiency": 0.0,
+            "mean_cable_delay_ms": 0.0,
         }
 
     # Exact directed density D = |E| / (N(N-1)) without self-connections
@@ -180,6 +183,21 @@ def analyze_topology(connectome: SonapseConnectome) -> Dict[str, Any]:
     fractal_dim = math.log(max(2, len(boxes_fine)) / max(1.0, float(len(boxes_coarse)))) / math.log(2.0) + 1.0
     fractal_dim = max(1.0, min(2.95, fractal_dim))
 
+    # SYNAPSE-ATLAS physical 3D wiring length & NeuroPulse-CableLab axial cable conduction delay
+    total_wiring_len = 0.0
+    total_cable_delay_ms = 0.0
+    g_ax = 1.45  # Phenomenological axial conductance constant (NeuroPulse-CableLab)
+    for syn in active_syns:
+        p1 = connectome.neurons[syn.pre_id].pos_3d or [0.0, 0.0, 0.0]
+        p2 = connectome.neurons[syn.post_id].pos_3d or [0.0, 0.0, 0.0]
+        dist_3d = math.sqrt(sum((float(a) - float(b)) ** 2 for a, b in zip(p1, p2)))
+        total_wiring_len += dist_3d
+        delay_ticks = float(getattr(syn, "delay_ticks", 1))
+        total_cable_delay_ms += (dist_3d / (g_ax * (1.0 + 0.25 * abs(syn.weight)))) + 0.35 * delay_ticks
+
+    mean_cable_delay = total_cable_delay_ms / float(max(1, e_count))
+    wiring_efficiency = (float(e_count) / max(1.0, total_wiring_len)) * (1.0 / max(1.0, avg_path_length))
+
     return {
         "num_neurons": n_count,
         "num_synapses": e_count,
@@ -199,4 +217,7 @@ def analyze_topology(connectome: SonapseConnectome) -> Dict[str, Any]:
         "causal_emergence_index": round(float(causal_emergence), 4),
         "fractal_dimension_proxy": round(float(fractal_dim), 4),
         "graft_synapses": int(graft_count),
+        "total_wiring_length": round(float(total_wiring_len), 3),
+        "wiring_economy_efficiency": round(float(wiring_efficiency), 4),
+        "mean_cable_delay_ms": round(float(mean_cable_delay), 4),
     }
