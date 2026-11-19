@@ -765,6 +765,28 @@
     gap: 0.45rem;
   }
 
+  .dot-graft {
+    background: #ffd166;
+    box-shadow: 0 0 8px rgba(255, 209, 102, 0.75);
+  }
+
+  .inline-search-row {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+  }
+
+  .compact-input {
+    background: rgba(12, 22, 38, 0.9);
+    color: var(--text-main, #e2e8f0);
+    border: 1px solid var(--border-subtle);
+    border-radius: 8px;
+    padding: 0.32rem 0.6rem;
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    min-inline-size: 185px;
+  }
+
   @media (prefers-reduced-motion: no-preference) {
     .hud-chip,
     .btn {

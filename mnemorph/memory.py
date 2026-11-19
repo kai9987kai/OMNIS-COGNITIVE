@@ -415,3 +415,189 @@ class MnemorphMemory:
             "conflicts": self.detect_conflicts()[:10],
             "graph": {"nodes": nodes, "edges": edges},
         }
+
+    @staticmethod
+    def _tokenize_text(text: str) -> List[str]:
+        cleaned = "".join(ch.lower() if (ch.isalnum() or ch == "_") else " " for ch in str(text))
+        return [tok for tok in cleaned.split() if tok]
+
+    def _record_tokens(self, rec: MemoryRecord) -> List[str]:
+        parts: List[str] = [rec.memory_class, rec.provenance, rec.memory_id]
+        for k, v in (rec.content or {}).items():
+            parts.append(f"{k} {v}")
+        for k, v in (rec.context or {}).items():
+            parts.append(f"{k} {v}")
+        if rec.reward_assoc > 0.05:
+            parts.append("positive reward gain")
+        elif rec.reward_assoc < -0.05:
+            parts.append("negative hazard penalty")
+        return self._tokenize_text(" ".join(parts))
+
+    def hybrid_retrieve(
+        self,
+        query_embedding: Optional[List[float]] = None,
+        query_text: str = "",
+        memory_class: Optional[MemoryClass | str] = None,
+        top_k: int = 5,
+        rrf_k: int = 60,
+    ) -> List[Dict[str, Any]]:
+        """NexusSearch-inspired Hybrid Retrieval fusing BM25 lexical ranking and Cosine Vector ranking via Reciprocal Rank Fusion (RRF)."""
+        if not self.records:
+            return []
+        cls_filter = memory_class.value if isinstance(memory_class, MemoryClass) else memory_class
+        candidates = [
+            r for r in self.records.values()
+            if cls_filter is None or r.memory_class == cls_filter
+        ]
+        if not candidates:
+            return []
+
+        q_tokens = self._tokenize_text(query_text)
+        doc_tokens: Dict[str, List[str]] = {r.memory_id: self._record_tokens(r) for r in candidates}
+        avg_dl = max(1.0, sum(len(toks) for toks in doc_tokens.values()) / float(len(candidates)))
+        n_docs = len(candidates)
+
+        df: Dict[str, int] = {}
+        for q_tok in set(q_tokens):
+            df[q_tok] = sum(1 for toks in doc_tokens.values() if q_tok in toks)
+
+        k1 = 1.5
+        b = 0.75
+        bm25_scores: Dict[str, float] = {}
+        for r in candidates:
+            toks = doc_tokens[r.memory_id]
+            dl = len(toks)
+            score = 0.0
+            for q_tok in q_tokens:
+                tf = toks.count(q_tok)
+                if tf == 0:
+                    continue
+                doc_freq = df.get(q_tok, 0)
+                idf = math.log(1.0 + (n_docs - doc_freq + 0.5) / (doc_freq + 0.5))
+                denom = tf + k1 * (1.0 - b + b * (dl / avg_dl))
+                score += idf * ((tf * (k1 + 1.0)) / max(1e-9, denom))
+            bm25_scores[r.memory_id] = score
+
+        vec_scores: Dict[str, float] = {}
+        for r in candidates:
+            sim = cosine_similarity(query_embedding or [], r.embedding) if query_embedding else 0.0
+            vec_scores[r.memory_id] = 0.65 * max(0.0, sim) + 0.25 * r.importance + 0.10 * r.strength
+
+        vec_ranked = sorted(candidates, key=lambda r: vec_scores[r.memory_id], reverse=True)
+        bm25_ranked = sorted(candidates, key=lambda r: (bm25_scores[r.memory_id], r.importance), reverse=True)
+        vec_rank_map = {r.memory_id: rank + 1 for rank, r in enumerate(vec_ranked)}
+        bm25_rank_map = {r.memory_id: rank + 1 for rank, r in enumerate(bm25_ranked)}
+
+        k_const = max(1, int(rrf_k))
+        fused: List[Dict[str, Any]] = []
+        for r in candidates:
+            mid = r.memory_id
+            rrf = (1.0 / (k_const + vec_rank_map[mid])) + (1.0 / (k_const + bm25_rank_map[mid]))
+            if q_tokens and bm25_scores[mid] > 0:
+                rrf += 0.005 * min(1.0, bm25_scores[mid])
+            fused.append(
+                {
+                    "memory_id": mid,
+                    "memory_class": r.memory_class,
+                    "provenance": r.provenance,
+                    "rrf_score": round(float(rrf), 6),
+                    "bm25_score": round(float(bm25_scores[mid]), 4),
+                    "vector_score": round(float(vec_scores[mid]), 4),
+                    "importance": round(float(r.importance), 4),
+                    "strength": round(float(r.strength), 4),
+                    "reward_assoc": round(float(r.reward_assoc), 4),
+                    "content": dict(r.content),
+                }
+            )
+
+        fused.sort(key=lambda item: (item["rrf_score"], item["bm25_score"], item["vector_score"]), reverse=True)
+        return fused[: max(1, int(top_k))]
+
+    def run_carrier_archaeology_assay(self, connectome: Any) -> Dict[str, Any]:
+        """MEMORY-CARRIER-OBSERVATORY / Mnemorph / MOLT 2^4 = 16 subset factorial carrier ablation assay."""
+        active_syns = connectome.active_synapses() if connectome is not None else []
+        w_capacity = min(
+            1.0,
+            sum(abs(s.weight) for s in active_syns) / max(1.0, len(active_syns) * 0.65),
+        ) if active_syns else 0.25
+
+        episodic_working = [
+            r for r in self.records.values()
+            if r.memory_class in (
+                MemoryClass.WORKING.value,
+                MemoryClass.EPISODIC.value,
+                MemoryClass.LONG_TERM.value,
+            )
+        ]
+        trace_capacity = min(
+            1.0,
+            0.25 + (sum(r.importance * r.strength for r in episodic_working) / max(1.0, len(self.records) * 0.45)),
+        ) if self.records else 0.20
+
+        ewc_fisher = sum(getattr(s, "fisher_importance", 0.0) + abs(getattr(s, "consolidated_weight", 0.0)) for s in active_syns)
+        sem_proc = sum(
+            1 for r in self.records.values()
+            if r.memory_class in (MemoryClass.SEMANTIC.value, MemoryClass.PROCEDURAL.value)
+        )
+        anchor_capacity = min(1.0, 0.20 + 0.04 * ewc_fisher + 0.08 * sem_proc)
+
+        graft_count = sum(1 for s in active_syns if getattr(s, "is_graft", False))
+        p_trace = sum(getattr(s, "plasticity_trace", 0.0) for s in active_syns)
+        nm_dict = getattr(connectome, "neuromodulators", {}) if connectome is not None else {}
+        nm_energy = sum(abs(float(v)) for v in nm_dict.values()) / max(1, len(nm_dict) or 1)
+        graft_capacity = min(1.0, 0.22 + 0.10 * graft_count + 0.08 * p_trace + 0.25 * nm_energy)
+
+        carrier_capacities = {
+            "C1_synaptic_weights": round(float(w_capacity), 4),
+            "C2_episodic_working_traces": round(float(trace_capacity), 4),
+            "C3_ewc_consolidated_anchors": round(float(anchor_capacity), 4),
+            "C4_neuromodulator_grafts": round(float(graft_capacity), 4),
+        }
+
+        weights = (0.36, 0.26, 0.20, 0.18)
+        caps = (w_capacity, trace_capacity, anchor_capacity, graft_capacity)
+        full_raw = sum(w * c for w, c in zip(weights, caps)) + 0.12 * (w_capacity * trace_capacity) + 0.08 * (anchor_capacity * graft_capacity)
+        norm_denom = max(1e-6, full_raw)
+
+        factorial_matrix: List[Dict[str, Any]] = []
+        for mask_int in range(16):
+            b1 = (mask_int >> 3) & 1
+            b2 = (mask_int >> 2) & 1
+            b3 = (mask_int >> 1) & 1
+            b4 = mask_int & 1
+            bits = (b1, b2, b3, b4)
+            mask_code = f"{b1}{b2}{b3}{b4}"
+            linear = sum(b * w * c for b, w, c in zip(bits, weights, caps))
+            synergy = 0.12 * (b1 * b2 * w_capacity * trace_capacity) + 0.08 * (b3 * b4 * anchor_capacity * graft_capacity)
+            retention = min(1.0, max(0.0, (linear + synergy) / norm_denom))
+            factorial_matrix.append(
+                {
+                    "mask": mask_code,
+                    "active_carriers": sum(bits),
+                    "C1_weights": bool(b1),
+                    "C2_traces": bool(b2),
+                    "C3_anchors": bool(b3),
+                    "C4_grafts": bool(b4),
+                    "retention_score": round(float(retention), 4),
+                    "reconstruction_gap": round(float(1.0 - retention), 4),
+                }
+            )
+
+        by_mask = {row["mask"]: row["retention_score"] for row in factorial_matrix}
+        single_removal_drop = {
+            "C1_synaptic_weights": round(1.0 - by_mask["0111"], 4),
+            "C2_episodic_working_traces": round(1.0 - by_mask["1011"], 4),
+            "C3_ewc_consolidated_anchors": round(1.0 - by_mask["1101"], 4),
+            "C4_neuromodulator_grafts": round(1.0 - by_mask["1110"], 4),
+        }
+        dominant_carrier = max(single_removal_drop.items(), key=lambda kv: kv[1])[0]
+
+        return {
+            "agent_id": self.agent_id,
+            "assay_protocol": "MEMORY-CARRIER-OBSERVATORY 2^4 Subset Factorial",
+            "carrier_capacities": carrier_capacities,
+            "single_removal_drop": single_removal_drop,
+            "dominant_carrier": dominant_carrier,
+            "synergy_index": round(float(1.0 - sum(by_mask[m] for m in ("1000", "0100", "0010", "0001"))), 4),
+            "factorial_matrix": factorial_matrix,
+        }

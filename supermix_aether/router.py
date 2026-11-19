@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import math
 import time
 from typing import Any, Callable, Dict, List, Optional
 
@@ -138,6 +139,34 @@ class SupermixAether:
                 metadata={"description": "Local PyTorch MLP specialist policy scorer"},
             )
         )
+        self.register_model(
+            SpecialistModel(
+                model_id="local_active_inference_epistemic",
+                task_types=["decision_arbitration", "navigation", "foraging"],
+                backend_type="local",
+                priority=8,
+                handler=self._local_active_inference_handler,
+                metadata={"description": "Active Inference Expected Free Energy epistemic navigation specialist"},
+            )
+        )
+
+    @staticmethod
+    def _local_active_inference_handler(payload: Dict[str, Any]) -> Dict[str, Any]:
+        features = list(payload.get("features", [0.0] * 8))
+        while len(features) < 8:
+            features.append(0.0)
+        res_dx, res_dy, res_prox = float(features[0]), float(features[1]), float(features[2])
+        haz_dx, haz_dy, haz_prox = float(features[3]), float(features[4]), float(features[5])
+        energy_norm = float(features[7])
+        epistemic_bonus = 0.25 * (1.0 - res_prox)
+        scores = [
+            -0.55 * res_dy + 0.45 * haz_dy + epistemic_bonus,
+            0.55 * res_dx - 0.45 * haz_dx + epistemic_bonus,
+            0.55 * res_dy - 0.45 * haz_dy + epistemic_bonus,
+            -0.55 * res_dx + 0.45 * haz_dx + epistemic_bonus,
+            0.20 * (1.0 - haz_prox) * (1.0 - energy_norm),
+        ]
+        return {"action_scores": [round(float(s), 5) for s in scores], "confidence": 0.82}
 
     @staticmethod
     def _local_foraging_handler(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -226,6 +255,81 @@ class SupermixAether:
                     )
 
         return {"status": "fallback_empty", "model_id": None, "result": {}}
+
+    def tether_arbitrate(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """Supermix-Tether & FAULTLINE counterfactual intervention control and ensemble correlation audit."""
+        base_features = list(payload.get("features", [0.4, -0.2, 0.65, -0.3, 0.25, 0.35, 0.1, 0.75]))
+        while len(base_features) < 8:
+            base_features.append(0.0)
+
+        relevant_perturbed = list(base_features)
+        relevant_perturbed[0] = -relevant_perturbed[0] if abs(relevant_perturbed[0]) > 0.05 else 0.6
+        relevant_perturbed[1] = -relevant_perturbed[1] if abs(relevant_perturbed[1]) > 0.05 else -0.6
+
+        irrelevant_perturbed = list(base_features)
+        irrelevant_perturbed[6] = min(1.0, irrelevant_perturbed[6] + 0.45)
+
+        decision_models = [
+            m for m in self.models.values()
+            if "decision_arbitration" in m.task_types and m.healthy and m.handler is not None
+            and (m.backend_type == "local" or self.allow_external_apis)
+        ]
+
+        donor_reports: List[Dict[str, Any]] = []
+        weighted_consensus = [0.0] * 5
+        total_weight = 0.0
+        top_picks: List[int] = []
+
+        for m in decision_models:
+            base_out = m.handler({"features": base_features})
+            rel_out = m.handler({"features": relevant_perturbed})
+            irr_out = m.handler({"features": irrelevant_perturbed})
+
+            s_base = list(base_out.get("action_scores", [0.0] * 5))[:5]
+            s_rel = list(rel_out.get("action_scores", [0.0] * 5))[:5]
+            s_irr = list(irr_out.get("action_scores", [0.0] * 5))[:5]
+
+            rel_effect = math.sqrt(sum((a - b) ** 2 for a, b in zip(s_base, s_rel)) / 5.0)
+            irr_leakage = math.sqrt(sum((a - b) ** 2 for a, b in zip(s_base, s_irr)) / 5.0)
+            tether_score = max(0.05, min(1.0, (0.35 + rel_effect) / (0.35 + rel_effect + 1.5 * irr_leakage)))
+
+            best_act = int(max(range(len(s_base)), key=lambda i: s_base[i]))
+            top_picks.append(best_act)
+            weight = tether_score * float(base_out.get("confidence", 0.75))
+            total_weight += weight
+            for i in range(5):
+                weighted_consensus[i] += weight * float(s_base[i])
+
+            donor_reports.append(
+                {
+                    "model_id": m.model_id,
+                    "preferred_action": best_act,
+                    "relevant_intervention_effect": round(float(rel_effect), 4),
+                    "irrelevant_leakage": round(float(irr_leakage), 4),
+                    "tether_fidelity": round(float(tether_score), 4),
+                    "action_scores": [round(float(x), 4) for x in s_base],
+                }
+            )
+
+        if total_weight > 1e-9:
+            weighted_consensus = [round(v / total_weight, 5) for v in weighted_consensus]
+        chosen_action = int(max(range(5), key=lambda i: weighted_consensus[i]))
+
+        # FAULTLINE higher-order correlated disagreement/failure metric
+        unique_picks = len(set(top_picks)) if top_picks else 1
+        disagreement_rate = (unique_picks - 1) / float(max(1, len(top_picks)))
+        mean_leakage = sum(d["irrelevant_leakage"] for d in donor_reports) / float(max(1, len(donor_reports)))
+        faultline_risk = round(min(1.0, 0.45 * disagreement_rate + 0.55 * mean_leakage), 4)
+
+        return {
+            "protocol": "Supermix-Tether + FAULTLINE Counterfactual Audit",
+            "donors_evaluated": len(donor_reports),
+            "consensus_action": chosen_action,
+            "consensus_scores": weighted_consensus,
+            "faultline_correlated_risk": faultline_risk,
+            "ensemble_status": "ROBUST" if faultline_risk < 0.35 else "ELEVATED_CORRELATION",
+            "donor_reports": donor_reports,
+        }
 
     def get_status(self) -> Dict[str, Any]:
         return {

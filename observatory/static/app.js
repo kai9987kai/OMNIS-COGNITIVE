@@ -436,6 +436,8 @@
         ? 0x26e3a8
         : dw < -0.002
         ? 0xff5b84
+        : e.is_graft
+        ? 0xffd166
         : e.weight >= 0
         ? 0x00e5ff
         : 0x9d6bff;
@@ -443,6 +445,8 @@
         ? 0.16
         : dwStrong
         ? Math.min(0.95, 0.6 + Math.abs(dw) * 8)
+        : e.is_graft
+        ? 0.88
         : Math.min(0.75, 0.25 + Math.abs(e.weight) * 0.35);
       const mat = new THREE.LineBasicMaterial({ color, transparent: true, opacity });
       group.add(new THREE.Line(geom, mat));
@@ -559,6 +563,8 @@
         ? `rgba(38,227,168,${Math.min(0.95, 0.55 + Math.abs(dw) * 8)})`
         : dw < -0.002
         ? `rgba(255,91,132,${Math.min(0.95, 0.55 + Math.abs(dw) * 8)})`
+        : e.is_graft
+        ? "rgba(255,209,102,0.88)"
         : e.weight >= 0
         ? `rgba(0,229,255,${Math.min(0.85, 0.2 + Math.abs(e.weight) * 0.45)})`
         : `rgba(157,107,255,${Math.min(0.85, 0.2 + Math.abs(e.weight) * 0.45)})`;
@@ -810,6 +816,13 @@
     }
 
     const t = data.topology;
+    const ceEl = $("#hud-causal-emergence");
+    if (ceEl) ceEl.textContent = Number(t.causal_emergence_index || 0).toFixed(4);
+    const somaSel = $("#conn-neuron-model");
+    if (somaSel && data.neuron_model && document.activeElement !== somaSel) {
+      somaSel.value = data.neuron_model;
+    }
+
     renderKV("#topology-metrics", [
       ["Neurons", t.num_neurons],
       ["Synapses", t.num_synapses],
@@ -819,10 +832,39 @@
       ["Avg Path Len", t.avg_path_length.toFixed(3)],
       ["Redundant Paths", t.redundant_pathways],
       ["Isolated", t.isolated_neurons.length],
+      ["Causal Emergence", Number(t.causal_emergence_index || 0).toFixed(4)],
+      ["Effective Info EI", Number(t.effective_information_macro || 0).toFixed(3)],
+      ["Fractal Dim D_f", Number(t.fractal_dimension_proxy || 1.0).toFixed(3)],
+      ["NeuroGrafts", t.graft_synapses ?? 0],
     ]);
 
     $("#cognitive-state-pre").textContent = JSON.stringify(data.cognitive_state || { note: "Step simulation to populate C_t" }, null, 2);
   }
+
+  async function modifyConnectomeArchitecture(operation, extra = {}) {
+    init3DConnectomeHost();
+    const somaEl = $("#conn-neuron-model");
+    const data = await api("/api/connectome/neurograft", {
+      method: "POST",
+      body: JSON.stringify({
+        organism_id: state.selectedOrganismId,
+        operation,
+        neuron_model: somaEl ? somaEl.value : undefined,
+        ...extra,
+      }),
+    });
+    applyConnectomePayload(data, null);
+    if (data.graft_result) {
+      const gr = data.graft_result;
+      announce(
+        `Connectome ${gr.operation} applied (model=${data.neuron_model}, grafts=${data.topology?.graft_synapses ?? 0}, CE=${data.topology?.causal_emergence_index ?? 0}).`
+      );
+    }
+  }
+
+  $("#conn-neuron-model")?.addEventListener("change", () => modifyConnectomeArchitecture("switch_model"));
+  $("#btn-inject-graft")?.addEventListener("click", () => modifyConnectomeArchitecture("neurograft", { max_grafts: 3 }));
+  $("#btn-fractal-reseed")?.addEventListener("click", () => modifyConnectomeArchitecture("fractal", { branch_factor: 2 }));
 
   async function stimulateNeuron(neuronId = null) {
     init3DConnectomeHost();
@@ -901,7 +943,56 @@
     const qs = state.selectedOrganismId ? `?organism_id=${encodeURIComponent(state.selectedOrganismId)}` : "";
     const snap = await api(`/api/memory${qs}`);
     renderMemoryData(snap);
+    await runMemoryHybridSearch();
   }
+
+  async function runMemoryHybridSearch() {
+    const list = $("#memory-hybrid-results");
+    if (!list) return;
+    const queryText = $("#memory-hybrid-query")?.value || "";
+    const res = await api("/api/memory/hybrid-search", {
+      method: "POST",
+      body: JSON.stringify({
+        organism_id: state.selectedOrganismId,
+        query_text: queryText,
+        top_k: 6,
+      }),
+    });
+    const hits = res.results || [];
+    list.innerHTML = hits.length
+      ? hits
+          .map(
+            (h) =>
+              `<li><span class="ltp-badge">RRF ${Number(h.rrf_score).toFixed(4)}</span><strong>${escapeHtml(h.memory_id)}</strong> (${escapeHtml(h.memory_class)} · ${escapeHtml(h.provenance)}) · BM25=${Number(h.bm25_score).toFixed(3)} · Vec=${Number(h.vector_score).toFixed(3)} · R=${Number(h.reward_assoc).toFixed(2)}</li>`
+          )
+          .join("")
+      : `<li>No memory records matched query.</li>`;
+  }
+
+  $("#btn-memory-hybrid-search")?.addEventListener("click", async () => {
+    await runMemoryHybridSearch();
+    announce("Executed NexusSearch BM25 + Vector Reciprocal Rank Fusion memory query.");
+  });
+
+  $("#btn-carrier-assay")?.addEventListener("click", async () => {
+    const qs = state.selectedOrganismId ? `?organism_id=${encodeURIComponent(state.selectedOrganismId)}` : "";
+    const res = await api(`/api/memory/carrier-assay${qs}`, { method: "POST" });
+    const box = $("#carrier-assay-box");
+    if (box) {
+      const caps = res.carrier_capacities || {};
+      const drops = res.single_removal_drop || {};
+      const mat = (res.factorial_matrix || [])
+        .filter((r) => ["1111", "0111", "1011", "1101", "1110", "1100", "0011", "0000"].includes(r.mask))
+        .map((r) => `[${r.mask}] ret=${Number(r.retention_score).toFixed(3)} (gap=${Number(r.reconstruction_gap).toFixed(3)})`)
+        .join(" · ");
+      box.innerHTML =
+        `<strong>${escapeHtml(res.assay_protocol)}</strong> · Dominant Carrier: <strong>${escapeHtml(res.dominant_carrier)}</strong> · Synergy=${res.synergy_index}<br>` +
+        `Capacities: C1(Weights)=${caps.C1_synaptic_weights} · C2(Traces)=${caps.C2_episodic_working_traces} · C3(EWC)=${caps.C3_ewc_consolidated_anchors} · C4(Grafts)=${caps.C4_neuromodulator_grafts}<br>` +
+        `Single-Removal Drop: ΔC1=${drops.C1_synaptic_weights} · ΔC2=${drops.C2_episodic_working_traces} · ΔC3=${drops.C3_ewc_consolidated_anchors} · ΔC4=${drops.C4_neuromodulator_grafts}<br>` +
+        `2^4 Matrix Sample: ${escapeHtml(mat)}`;
+    }
+    announce(`Completed 2^4 Carrier Archaeology Assay (dominant carrier: ${res.dominant_carrier}).`);
+  });
 
   function renderMemoryData(snap) {
     const counts = snap.class_counts || {};
@@ -1380,10 +1471,35 @@
       `neurons=${res.neurons}, synapses=${res.active_synapses}, drive_norm=${res.drive_norm}, latency=${res.latency_ms}ms`;
     announce(`PyTorch tensor pass executed on ${res.device}.`);
   });
+
+  $("#btn-hyperion-schedule")?.addEventListener("click", async () => {
+    const res = await api("/api/hardware/hyperion-schedule", {
+      method: "POST",
+      body: JSON.stringify({ workload_type: "dual_soma", complexity: 1.5 }),
+    });
+    $("#hardware-action-box").textContent =
+      `HYPERION-20 Scheduler (${res.total_service_classes} service classes): assigned=${res.assigned_service_class} ` +
+      `(domain=${res.domain}, backend=${res.target_backend}, cost=${res.estimated_cost_units}, dispatches=${res.total_dispatches})`;
+    await refreshHardware();
+    announce(`HYPERION-20 dispatched workload to ${res.assigned_service_class}.`);
+  });
+
+  $("#btn-tether-audit")?.addEventListener("click", async () => {
+    const res = await api("/api/hardware/tether-audit", { method: "POST", body: JSON.stringify({}) });
+    const donors = (res.donor_reports || [])
+      .map((d) => `${d.model_id}: fidelity=${d.tether_fidelity} (rel=${d.relevant_intervention_effect}, leak=${d.irrelevant_leakage})`)
+      .join(" | ");
+    $("#hardware-action-box").textContent =
+      `${res.protocol}: status=${res.ensemble_status}, consensus_action=${res.consensus_action}, ` +
+      `FAULTLINE_risk=${res.faultline_correlated_risk} · Donors: ${donors}`;
+    announce(`Supermix-Tether & FAULTLINE audit complete (${res.ensemble_status}).`);
+  });
+
   async function refreshHardware() {
     const data = await api("/api/hardware");
     const hw = data.hardware || {};
     const neuro = hw.neuromorphic_simulation || {};
+    const hyp = hw.hyperion_20 || {};
     renderKV("#hardware-kv", [
       ["Active Backend", hw.active_backend],
       ["GPU Available", hw.gpu_available ? "Yes" : "No (CPU fallback)"],
@@ -1393,6 +1509,7 @@
       ["Physical Neuro Device", neuro.physical_device_connected ? "Connected" : "None"],
       ["Sparse Spike Ratio", neuro.sparse_activation_ratio ?? 0],
       ["Simulated SynOps", `${neuro.synops_executed ?? 0} (~${neuro.estimated_energy_pj ?? 0} pJ)`],
+      ["HYPERION-20 Classes", `${hyp.total_service_classes ?? 20} (${hyp.total_dispatches ?? 0} dispatches)`],
     ]);
 
     $("#models-tbody").innerHTML = (data.supermix_aether?.models || [])

@@ -713,3 +713,113 @@ def test_25_live_signals_neuromodulated_plasticity_and_stimulation_api() -> None
     finally:
         omnis.shutdown()
 
+
+# 26. kai9987kai ecosystem innovations: Dual-Soma (DSAG), Liquid-LTC, NeuroGraft, Fractal, Causal Emergence, NexusSearch RRF, 2^4 Carrier Assay, Tether/FAULTLINE, and HYPERION-20
+def test_26_kai_ecosystem_innovations_dual_soma_rrf_carrier_tether_hyperion() -> None:
+    # 1. Dual-Soma & Liquid-LTC neuron activations
+    a_ds, u_ds = activate_neuron(1.1, "dual_soma", threshold=0.45, soma2_u=0.6)
+    a_ltc, u_ltc = activate_neuron(1.1, "liquid_ltc", threshold=0.45, tau=1.2)
+    assert -1.0 <= a_ds <= 1.0 and math.isfinite(u_ds)
+    assert -1.0 <= a_ltc <= 1.0 and math.isfinite(u_ltc)
+
+    # 2. NeuroGraft, Fractal reseed, and Causal Emergence topology metrics
+    conn = SonapseConnectome(input_dim=6, hidden_dim=8, output_dim=4, neuron_model="dual_soma", seed=42)
+    graft_res = conn.inject_neurograft(max_grafts=3)
+    assert graft_res["total_grafts"] >= 1
+    frac_res = conn.reseed_fractal_topology(branch_factor=2)
+    assert frac_res["repositioned_hidden"] == 8
+    conn.step([0.6, -0.3, 0.8, 0.1, -0.4, 0.5])
+    topo = analyze_topology(conn)
+    assert topo["graft_synapses"] >= 1
+    assert topo["causal_emergence_index"] >= 0.0
+    assert topo["effective_information_macro"] > 0.0
+    assert 1.0 <= topo["fractal_dimension_proxy"] <= 3.0
+
+    # 3. NexusSearch BM25 + Cosine Vector Reciprocal Rank Fusion & 2^4 Carrier Archaeology Assay
+    mem = MnemorphMemory(agent_id="org_kai_test", max_memories=100, seed=42)
+    mem.encode(
+        MemoryClass.EPISODIC,
+        content={"action_name": "NORTH", "event": "resource_harvest_beacon", "reward": 1.25},
+        embedding=[0.8, 0.2, 0.9, 0.1],
+        reward_assoc=1.25,
+        significance=0.9,
+        provenance="interaction",
+    )
+    mem.encode(
+        MemoryClass.WORKING,
+        content={"action_name": "WEST", "event": "hazard_collision", "reward": -0.85},
+        embedding=[-0.7, -0.4, 0.1, 0.8],
+        reward_assoc=-0.85,
+        significance=0.75,
+        provenance="perception",
+    )
+    rrf_hits = mem.hybrid_retrieve(
+        query_embedding=[0.75, 0.25, 0.85, 0.1],
+        query_text="resource_harvest_beacon positive reward",
+        top_k=2,
+    )
+    assert len(rrf_hits) == 2
+    assert rrf_hits[0]["bm25_score"] > 0.0
+    assert rrf_hits[0]["rrf_score"] >= rrf_hits[1]["rrf_score"]
+
+    assay = mem.run_carrier_archaeology_assay(conn)
+    assert len(assay["factorial_matrix"]) == 16
+    assert assay["dominant_carrier"] in assay["carrier_capacities"]
+    by_mask = {r["mask"]: r["retention_score"] for r in assay["factorial_matrix"]}
+    assert by_mask["1111"] == 1.0 and by_mask["0000"] == 0.0
+
+    # 4. Supermix-Tether & FAULTLINE audit + HYPERION-20 scheduler
+    sm = SupermixAether(allow_external_apis=False)
+    tether = sm.tether_arbitrate({"features": [0.55, -0.25, 0.8, -0.3, 0.2, 0.4, 0.1, 0.85]})
+    assert tether["donors_evaluated"] >= 3
+    assert 0 <= tether["consensus_action"] < 5
+    assert 0.0 <= tether["faultline_correlated_risk"] <= 1.0
+
+    hw = HardwareManager()
+    sched = hw.schedule_workload(workload_type="dual_soma", complexity=1.6)
+    assert sched["scheduler"] == "HYPERION-20"
+    assert sched["total_service_classes"] == 20
+    assert sched["assigned_service_class"] == "SC07_DUAL_SOMA_DSAG"
+
+    # 5. GhostEngine new canonical hypothesis: dual_soma_graft_vs_baseline
+    ge = GhostEngine()
+    exp_rep = ge.run_experiment(name="dual_soma_graft_vs_baseline")
+    assert exp_rep["verdict"] == "supported"
+    assert exp_rep["statistical_analysis"]["mean_diff"] > 0.0
+
+    # 6. Observatory API new routes + Active Inference Free Energy telemetry
+    cfg = SystemConfig(seed=42, initial_population=3, grid_width=8, grid_height=8, db_path=":memory:")
+    omnis = OmnisCore(cfg)
+    try:
+        omnis.step(steps=2)
+        lead = omnis.get_organism()
+        assert lead is not None and lead.last_cognitive_state is not None
+        assert "variational_free_energy" in lead.last_cognitive_state.W_t
+        assert "epistemic_foraging_drive" in lead.last_cognitive_state.W_t
+
+        client = TestClient(create_observatory_app(omnis))
+        r_graft = client.post(
+            "/api/connectome/neurograft",
+            json={"operation": "neurograft", "max_grafts": 3, "neuron_model": "dual_soma"},
+        )
+        assert r_graft.status_code == 200
+        assert r_graft.json()["neuron_model"] == "dual_soma"
+        assert r_graft.json()["topology"]["graft_synapses"] >= 1
+
+        r_frac = client.post("/api/connectome/neurograft", json={"operation": "fractal", "branch_factor": 2})
+        assert r_frac.status_code == 200
+
+        r_hyb = client.post("/api/memory/hybrid-search", json={"query_text": "interaction", "top_k": 4})
+        assert r_hyb.status_code == 200 and "results" in r_hyb.json()
+
+        r_ca = client.post("/api/memory/carrier-assay")
+        assert r_ca.status_code == 200 and len(r_ca.json()["factorial_matrix"]) == 16
+
+        r_hyp = client.post("/api/hardware/hyperion-schedule", json={"workload_type": "neurograft", "complexity": 1.4})
+        assert r_hyp.status_code == 200 and r_hyp.json()["assigned_service_class"] == "SC09_NEUROGRAFT_ROUTER"
+
+        r_teth = client.post("/api/hardware/tether-audit", json={})
+        assert r_teth.status_code == 200 and "faultline_correlated_risk" in r_teth.json()
+    finally:
+        omnis.shutdown()
+

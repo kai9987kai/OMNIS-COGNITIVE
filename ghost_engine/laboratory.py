@@ -36,6 +36,9 @@ class GhostEngine:
         steps: int = 45,
         task_switch_step: Optional[int] = None,
         advance_developmental_stages: bool = False,
+        neuron_model: str = "rate_coded",
+        inject_grafts: bool = False,
+        plasticity_mode: str = "three_factor",
     ) -> Dict[str, float]:
         world = DiamondWorld(
             width=10,
@@ -46,7 +49,11 @@ class GhostEngine:
             num_hazards=3,
             num_moving=1,
         )
-        org = ArtificialOrganism(seed=seed, neural_weight=0.65)
+        org = ArtificialOrganism(seed=seed, neural_weight=0.65, neuron_model=neuron_model)
+        org.genome["plasticity_mode"] = plasticity_mode
+        if inject_grafts:
+            org.connectome.inject_neurograft(max_grafts=4)
+            org.connectome.reseed_fractal_topology(branch_factor=2)
 
         if task_switch_step is not None:
             ref_world = DiamondWorld(
@@ -167,6 +174,7 @@ class GhostEngine:
             "memory_replay_retention": "MNEMORPH memory consolidation & replay improves task retention after task switching.",
             "developmental_vs_fixed": "Full OMNIS developmental adaptation outperforms fixed minimal architecture.",
             "morpheus_regeneration": "Morpheus structural & plasticity regeneration improves Recovery(t) over unassisted lesion.",
+            "dual_soma_graft_vs_baseline": "Dual-Soma (DSAG) + NeuroGraft + Neuromodulated plasticity outperforms fixed conventional reservoir.",
         }
         hyp = hypothesis or default_hypotheses.get(name, "Treatment configuration improves target dependent variable.")
 
@@ -186,6 +194,23 @@ class GhostEngine:
             dependent_var = "final_recovery_ratio"
             control_cfg = {"regeneration_enabled": False}
             treatment_cfg = {"regeneration_enabled": True}
+        elif name == "dual_soma_graft_vs_baseline":
+            control_cfg = {
+                "enable_plasticity": False,
+                "enable_memory_ops": False,
+                "enable_structural_adaptation": False,
+                "neuron_model": "conventional",
+                "inject_grafts": False,
+                "plasticity_mode": "three_factor",
+            }
+            treatment_cfg = {
+                "enable_plasticity": True,
+                "enable_memory_ops": True,
+                "enable_structural_adaptation": True,
+                "neuron_model": "dual_soma",
+                "inject_grafts": True,
+                "plasticity_mode": "neuromodulated",
+            }
         else:
             control_cfg = {"enable_plasticity": False, "enable_memory_ops": False, "enable_structural_adaptation": False}
             treatment_cfg = {"enable_plasticity": True, "enable_memory_ops": False, "enable_structural_adaptation": True}

@@ -185,11 +185,19 @@ class CognitivePipeline:
                 ewc_lambda=ewc_lambda,
                 chosen_action=action,
             )
+        # Active Inference Variational Free Energy F_t & Epistemic Foraging Drive G_pi
+        surprise_term = 0.5 * (float(model_err) ** 2 + float(td_error) ** 2)
+        homeostatic_kl = 0.25 * ((1.0 - min(1.2, float(obs["energy"]) / 100.0)) ** 2) + 0.15 * float(g_t["activation_entropy"])
+        variational_free_energy = surprise_term + homeostatic_kl
+        epistemic_drive = (1.0 / (1.0 + len(world_model.transitions) / 12.0)) + 0.35 * min(1.5, abs(float(model_err)))
+
         w_t = {
             "known_transitions": len(world_model.transitions),
             "model_prediction_error": round(model_err, 4),
             "planning_updates": planning_updates,
             "td_error": round(td_error, 4),
+            "variational_free_energy": round(variational_free_energy, 4),
+            "epistemic_foraging_drive": round(epistemic_drive, 4),
         }
 
         # 9. MEMORY CONSOLIDATION & REPLAY

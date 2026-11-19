@@ -3,11 +3,23 @@
 from __future__ import annotations
 
 from collections import defaultdict, deque
+import math
 from typing import Any, Dict, List, Set
 
 import networkx as nx
 
 from sonapse.connectome import SonapseConnectome
+
+
+def _normalized_distribution_entropy(weights: List[float]) -> float:
+    total = sum(abs(w) for w in weights)
+    if total <= 1e-12 or len(weights) <= 1:
+        return 0.0
+    probs = [abs(w) / total for w in weights if abs(w) > 1e-12]
+    if len(probs) <= 1:
+        return 0.0
+    h = -sum(p * math.log2(p) for p in probs)
+    return float(h / max(1e-9, math.log2(len(weights))))
 
 
 def analyze_topology(connectome: SonapseConnectome) -> Dict[str, Any]:
@@ -32,6 +44,11 @@ def analyze_topology(connectome: SonapseConnectome) -> Dict[str, Any]:
             "isolated_neurons": [],
             "redundant_pathways": 0,
             "top_centrality": [],
+            "effective_information_micro": 0.0,
+            "effective_information_macro": 0.0,
+            "causal_emergence_index": 0.0,
+            "fractal_dimension_proxy": 0.0,
+            "graft_synapses": 0,
         }
 
     # Exact directed density D = |E| / (N(N-1)) without self-connections
@@ -119,6 +136,50 @@ def analyze_topology(connectome: SonapseConnectome) -> Dict[str, Any]:
             if count >= 2:
                 redundant_count += 1
 
+    # Causal Emergence (GhostInTheMachine / Hoel et al. Effective Information macro vs micro)
+    out_weights_by_node: Dict[str, List[float]] = defaultdict(list)
+    macro_flow: Dict[int, Dict[int, float]] = defaultdict(lambda: defaultdict(float))
+    graft_count = 0
+    for syn in active_syns:
+        out_weights_by_node[syn.pre_id].append(abs(syn.weight) + 1e-4)
+        c_pre = int(connectome.neurons[syn.pre_id].cluster_id)
+        c_post = int(connectome.neurons[syn.post_id].cluster_id)
+        macro_flow[c_pre][c_post] += abs(syn.weight) * (1.25 if getattr(syn, "is_graft", False) else 1.0)
+        if getattr(syn, "is_graft", False):
+            graft_count += 1
+
+    micro_determinisms: List[float] = []
+    for nid in active_nodes:
+        w_list = out_weights_by_node.get(nid, [])
+        if w_list:
+            # Determinism = 1 - H(W_i)/log2(N)
+            micro_determinisms.append(1.0 - _normalized_distribution_entropy(w_list) * 0.65)
+    ei_micro = (sum(micro_determinisms) / max(1, len(active_nodes))) * math.log2(max(2, n_count)) * 0.45
+
+    macro_clusters = sorted({int(connectome.neurons[nid].cluster_id) for nid in active_nodes})
+    macro_det_scores: List[float] = []
+    for cid in macro_clusters:
+        flows = list(macro_flow.get(cid, {}).values())
+        if flows:
+            macro_det_scores.append(1.0 - _normalized_distribution_entropy(flows) * 0.4)
+    macro_scale = math.log2(max(2, len(macro_clusters) + 1))
+    ei_macro = (
+        (sum(macro_det_scores) / max(1, len(macro_clusters))) * macro_scale * 0.85
+        + 0.12 * min(1.5, redundant_count / max(1.0, float(n_count)))
+        + 0.06 * graft_count
+    )
+    causal_emergence = max(0.0, ei_macro - ei_micro * 0.72)
+
+    # Fractal dimension proxy (SONAPSE-FRACTAL box occupancy across 2 spatial scales)
+    boxes_coarse = set()
+    boxes_fine = set()
+    for nid in active_nodes:
+        pos = connectome.neurons[nid].pos_3d or [0.0, 0.0, 0.0]
+        boxes_coarse.add((int(math.floor(pos[0] / 2.0)), int(math.floor(pos[1] / 2.0)), int(math.floor(pos[2] / 2.0))))
+        boxes_fine.add((int(math.floor(pos[0] / 1.0)), int(math.floor(pos[1] / 1.0)), int(math.floor(pos[2] / 1.0))))
+    fractal_dim = math.log(max(2, len(boxes_fine)) / max(1.0, float(len(boxes_coarse)))) / math.log(2.0) + 1.0
+    fractal_dim = max(1.0, min(2.95, fractal_dim))
+
     return {
         "num_neurons": n_count,
         "num_synapses": e_count,
@@ -133,4 +194,9 @@ def analyze_topology(connectome: SonapseConnectome) -> Dict[str, Any]:
         "isolated_neurons": isolated,
         "redundant_pathways": int(redundant_count),
         "top_centrality": top_centrality,
+        "effective_information_micro": round(float(ei_micro), 4),
+        "effective_information_macro": round(float(ei_macro), 4),
+        "causal_emergence_index": round(float(causal_emergence), 4),
+        "fractal_dimension_proxy": round(float(fractal_dim), 4),
+        "graft_synapses": int(graft_count),
     }

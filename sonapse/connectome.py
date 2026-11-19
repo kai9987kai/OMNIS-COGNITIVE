@@ -11,7 +11,7 @@ import uuid
 import numpy as np
 
 
-VALID_NEURON_MODELS = ("conventional", "rate_coded", "threshold", "lif")
+VALID_NEURON_MODELS = ("conventional", "rate_coded", "threshold", "lif", "dual_soma", "liquid_ltc")
 VALID_PLASTICITY_MODES = ("three_factor", "hebbian", "hybrid", "neuromodulated")
 
 
@@ -21,7 +21,7 @@ class Neuron:
 
     neuron_id: str
     role: str = "hidden"  # input | hidden | output
-    neuron_model: str = "rate_coded"  # conventional | rate_coded | threshold | lif
+    neuron_model: str = "rate_coded"  # conventional | rate_coded | threshold | lif | dual_soma | liquid_ltc
     excitatory: bool = True
     u: float = 0.0
     a: float = 0.0
@@ -33,6 +33,9 @@ class Neuron:
     active: bool = True
     cluster_id: int = 0
     spike_count: int = 0
+    soma2_u: float = 0.0
+    glial_ca: float = 0.0
+    tau: float = 1.0
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -50,11 +53,32 @@ class Neuron:
             "active": bool(self.active),
             "cluster_id": int(self.cluster_id),
             "spike_count": int(self.spike_count),
+            "soma2_u": float(self.soma2_u),
+            "glial_ca": float(self.glial_ca),
+            "tau": float(self.tau),
         }
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "Neuron":
-        return cls(**data)
+        return cls(
+            neuron_id=data["neuron_id"],
+            role=data.get("role", "hidden"),
+            neuron_model=data.get("neuron_model", "rate_coded"),
+            excitatory=bool(data.get("excitatory", True)),
+            u=float(data.get("u", 0.0)),
+            a=float(data.get("a", 0.0)),
+            prev_a=float(data.get("prev_a", 0.0)),
+            bias=float(data.get("bias", 0.0)),
+            alpha=float(data.get("alpha", 0.65)),
+            threshold=float(data.get("threshold", 0.5)),
+            pos_3d=[float(x) for x in data.get("pos_3d", [0.0, 0.0, 0.0])],
+            active=bool(data.get("active", True)),
+            cluster_id=int(data.get("cluster_id", 0)),
+            spike_count=int(data.get("spike_count", 0)),
+            soma2_u=float(data.get("soma2_u", 0.0)),
+            glial_ca=float(data.get("glial_ca", 0.0)),
+            tau=float(data.get("tau", 1.0)),
+        )
 
 
 @dataclass
@@ -73,6 +97,8 @@ class Synapse:
     last_dw: float = 0.0
     last_flux: float = 0.0
     plasticity_trace: float = 0.0
+    delay_ticks: int = 1
+    is_graft: bool = False
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -88,6 +114,8 @@ class Synapse:
             "last_dw": float(self.last_dw),
             "last_flux": float(self.last_flux),
             "plasticity_trace": float(self.plasticity_trace),
+            "delay_ticks": int(self.delay_ticks),
+            "is_graft": bool(self.is_graft),
         }
 
     @classmethod
@@ -105,10 +133,18 @@ class Synapse:
             last_dw=float(data.get("last_dw", 0.0)),
             last_flux=float(data.get("last_flux", 0.0)),
             plasticity_trace=float(data.get("plasticity_trace", 0.0)),
+            delay_ticks=int(data.get("delay_ticks", 1)),
+            is_graft=bool(data.get("is_graft", False)),
         )
 
 
-def activate_neuron(u_next: float, neuron_model: str, threshold: float = 0.5) -> Tuple[float, float]:
+def activate_neuron(
+    u_next: float,
+    neuron_model: str,
+    threshold: float = 0.5,
+    soma2_u: float = 0.0,
+    tau: float = 1.0,
+) -> Tuple[float, float]:
     """Apply neuron activation model phi(u_next) returning (activation, next_u_after_reset)."""
     u_clamped = max(-20.0, min(20.0, float(u_next)))
     if neuron_model == "conventional":
@@ -123,6 +159,17 @@ def activate_neuron(u_next: float, neuron_model: str, threshold: float = 0.5) ->
         if u_clamped >= threshold:
             return 1.0, 0.0  # Spike and reset membrane potential
         return 0.0, u_clamped
+    if neuron_model == "dual_soma":
+        # DSAG Dual-Soma coupled compartment resonance (Two-Soma-Neuron-Lab / ODDITY-LAB)
+        u2_coupled = max(-20.0, min(20.0, 0.6 * float(soma2_u) + 0.4 * u_clamped))
+        dendritic_gate = 1.0 / (1.0 + math.exp(-(u2_coupled - 0.35 * threshold)))
+        act = math.tanh(u_clamped) * (0.65 + 0.35 * dendritic_gate)
+        return float(act), float(0.82 * u_clamped + 0.18 * u2_coupled)
+    if neuron_model == "liquid_ltc":
+        # Liquid Time-Constant (LTC) state-dependent ODE step
+        tau_eff = max(0.2, float(tau) / (1.0 + 0.45 * abs(u_clamped)))
+        u_ltc = u_clamped / (1.0 + 0.25 / tau_eff)
+        return float(math.tanh(u_ltc)), float(u_ltc)
     raise ValueError(f"Unknown neuron model: {neuron_model}")
 
 
@@ -386,8 +433,17 @@ class SonapseConnectome:
                     if target_role == "output":
                         outputs[nid] = 0.0
                     continue
-                u_next = n.alpha * n.u + drive + n.bias
-                a_next, u_after = activate_neuron(u_next, n.neuron_model, n.threshold)
+                n.soma2_u = 0.68 * n.soma2_u + 0.32 * drive
+                n.glial_ca = 0.90 * n.glial_ca + 0.10 * abs(n.prev_a)
+                glial_reg = -0.03 * (n.glial_ca - 0.35) if n.neuron_model in ("dual_soma", "liquid_ltc") else 0.0
+                u_next = n.alpha * n.u + drive + n.bias + glial_reg
+                a_next, u_after = activate_neuron(
+                    u_next,
+                    n.neuron_model,
+                    n.threshold,
+                    soma2_u=n.soma2_u,
+                    tau=n.tau,
+                )
                 n.u = u_after
                 n.a = a_next
                 if n.neuron_model == "lif" and a_next > 0.5:
@@ -718,6 +774,130 @@ class SonapseConnectome:
     def get_hidden_activations(self) -> List[float]:
         return [n.a for n in self.neurons.values() if n.role == "hidden" and n.active]
 
+    def set_neuron_model(self, neuron_model: str) -> str:
+        """Switch active connectome neuron model across hidden and output compartments."""
+        if neuron_model not in VALID_NEURON_MODELS:
+            raise ValueError(f"Unsupported neuron_model '{neuron_model}'. Expected one of {VALID_NEURON_MODELS}")
+        self.neuron_model = neuron_model
+        for n in self.neurons.values():
+            n.neuron_model = neuron_model
+        self.structural_events.append({"tick": self.step_count, "type": "set_neuron_model", "model": neuron_model})
+        return self.neuron_model
+
+    def inject_neurograft(self, max_grafts: int = 3) -> Dict[str, Any]:
+        """NEUROGRAFT / ODDITY-LAB axonal feedback & cross-cluster bridge synthesis."""
+        active_hidden = [n for n in self.neurons.values() if n.active and n.role == "hidden"]
+        graft_ids: List[str] = []
+
+        # 1. Prime aligned sensorimotor routing bridges (NEUROGRAFT trainable adapter layer)
+        aligned_bridges = [
+            ("in_0", "out_1", 0.32),
+            ("in_0", "out_3", -0.32),
+            ("in_1", "out_2", 0.32),
+            ("in_1", "out_0", -0.32),
+        ]
+        for pre_id, post_id, prior_w in aligned_bridges:
+            if len(graft_ids) >= max(1, int(max_grafts)):
+                break
+            sid = f"{pre_id}->{post_id}"
+            if sid in self.synapses:
+                syn = self.synapses[sid]
+                syn.active = True
+                if not syn.is_graft:
+                    syn.is_graft = True
+                    syn.delay_ticks = 2
+                    syn.plasticity_trace = max(syn.plasticity_trace, 0.25)
+                    if abs(syn.weight) < 0.15:
+                        syn.weight = prior_w
+                    graft_ids.append(sid)
+            elif pre_id in self.neurons and post_id in self.neurons:
+                syn = self.add_synapse(pre_id, post_id, weight=prior_w, enforce_limits=False)
+                if syn is not None:
+                    syn.is_graft = True
+                    syn.delay_ticks = 2
+                    syn.plasticity_trace = 0.25
+                    graft_ids.append(syn.synapse_id)
+
+        # 2. Cross-cluster hidden->hidden recurrence bridges
+        candidate_pairs: List[Tuple[str, str, float]] = []
+        for h1 in active_hidden:
+            for h2 in active_hidden:
+                if h1.neuron_id != h2.neuron_id and h1.cluster_id != h2.cluster_id:
+                    sid = f"{h1.neuron_id}->{h2.neuron_id}"
+                    if sid not in self.synapses:
+                        score = abs(h1.a) + abs(h2.a) + 0.1
+                        candidate_pairs.append((h1.neuron_id, h2.neuron_id, score))
+
+        candidate_pairs.sort(key=lambda item: item[2], reverse=True)
+        for pre_id, post_id, _ in candidate_pairs:
+            if len(graft_ids) >= max(1, int(max_grafts)):
+                break
+            sign = 1.0 if self.neurons[pre_id].excitatory else -1.0
+            syn = self.add_synapse(pre_id, post_id, weight=sign * 0.24, enforce_limits=True)
+            if syn is not None:
+                syn.is_graft = True
+                syn.delay_ticks = 2
+                syn.plasticity_trace = 0.25
+                graft_ids.append(syn.synapse_id)
+
+        if not graft_ids:
+            for syn in sorted(self.active_synapses(), key=lambda s: abs(s.weight), reverse=True):
+                if not syn.is_graft:
+                    syn.is_graft = True
+                    syn.delay_ticks = 2
+                    graft_ids.append(syn.synapse_id)
+                    if len(graft_ids) >= max(1, int(max_grafts)):
+                        break
+
+        if graft_ids:
+            self.structural_events.append(
+                {"tick": self.step_count, "type": "neurograft", "count": len(graft_ids)}
+            )
+        total_grafts = sum(1 for s in self.synapses.values() if s.active and s.is_graft)
+        return {
+            "grafts_added": len(graft_ids),
+            "graft_ids": graft_ids,
+            "total_grafts": total_grafts,
+        }
+
+    def reseed_fractal_topology(self, branch_factor: int = 2) -> Dict[str, Any]:
+        """SONAPSE-FRACTAL hierarchical self-similar spatial & topological re-wiring."""
+        hidden_nodes = [n for n in self.neurons.values() if n.role == "hidden"]
+        golden_angle = math.pi * (3.0 - math.sqrt(5.0))
+        for idx, n in enumerate(hidden_nodes):
+            level = idx % 3
+            radius = 1.55 + 0.85 * level
+            theta = idx * golden_angle
+            phi = (idx + 1) / float(max(1, len(hidden_nodes) + 1)) * math.pi
+            n.pos_3d = [
+                round(math.cos(phi) * 2.1, 4),
+                round(radius * math.sin(theta), 4),
+                round(radius * math.cos(theta), 4),
+            ]
+            n.cluster_id = level + 1
+
+        bf = max(1, min(4, int(branch_factor)))
+        added = 0
+        for idx, src in enumerate(hidden_nodes):
+            if not src.active:
+                continue
+            for step_scale in range(1, bf + 1):
+                dst = hidden_nodes[(idx + (2 ** (step_scale - 1))) % len(hidden_nodes)]
+                if dst.active and dst.neuron_id != src.neuron_id:
+                    syn = self.add_synapse(src.neuron_id, dst.neuron_id, weight=0.32 / step_scale, enforce_limits=True)
+                    if syn is not None:
+                        syn.is_graft = True
+                        added += 1
+
+        self.structural_events.append(
+            {"tick": self.step_count, "type": "fractal_reseed", "count": added}
+        )
+        return {
+            "repositioned_hidden": len(hidden_nodes),
+            "fractal_links_added": added,
+            "branch_factor": bf,
+        }
+
     def to_visualization_graph(self) -> Dict[str, Any]:
         """Return compact graph representation formatted for the 3D Connectome Explorer."""
         nodes = [n.to_dict() for n in self.neurons.values()]
@@ -734,12 +914,15 @@ class SonapseConnectome:
                 "age": s.age,
                 "active": s.active,
                 "excitatory": s.weight >= 0,
+                "is_graft": bool(s.is_graft),
+                "delay_ticks": int(s.delay_ticks),
             }
             for s in self.synapses.values()
         ]
         return {
             "step_count": self.step_count,
             "total_synops": self.total_synops,
+            "neuron_model": self.neuron_model,
             "density": round(self.current_density(), 5),
             "last_weight_delta_norm": round(self.last_weight_delta_norm, 6),
             "neuromodulators": {k: round(float(v), 4) for k, v in self.neuromodulators.items()},

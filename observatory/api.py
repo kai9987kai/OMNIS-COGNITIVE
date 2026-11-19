@@ -17,7 +17,7 @@ from core.schemas import SCHEMA_VERSION
 from diamond.environment import DiamondWorld
 from genesis.lifecycle import DEVELOPMENTAL_STAGES
 from neurohive.organism import ArtificialOrganism
-from sonapse.connectome import VALID_PLASTICITY_MODES
+from sonapse.connectome import VALID_NEURON_MODELS, VALID_PLASTICITY_MODES
 from sonapse.topology import analyze_topology
 
 
@@ -73,6 +73,31 @@ class LivePlasticityStepRequest(BaseModel):
     reward_override: Optional[float] = Field(default=None, ge=-2.0, le=2.0)
     learning_rate: Optional[float] = Field(default=None, ge=0.005, le=0.5)
     stimulate_neuron_id: Optional[str] = Field(default=None)
+
+
+class NeuroGraftRequest(BaseModel):
+    organism_id: Optional[str] = Field(default=None)
+    operation: str = Field(default="neurograft")  # neurograft | fractal | switch_model
+    max_grafts: int = Field(default=3, ge=1, le=12)
+    branch_factor: int = Field(default=2, ge=1, le=4)
+    neuron_model: Optional[str] = Field(default=None)
+
+
+class MemoryHybridSearchRequest(BaseModel):
+    organism_id: Optional[str] = Field(default=None)
+    query_text: str = Field(default="")
+    query_embedding: Optional[List[float]] = Field(default=None)
+    memory_class: Optional[str] = Field(default=None)
+    top_k: int = Field(default=5, ge=1, le=25)
+
+
+class HyperionScheduleRequest(BaseModel):
+    workload_type: str = Field(default="connectome_plasticity")
+    complexity: float = Field(default=1.25, ge=0.1, le=10.0)
+
+
+class TetherAuditRequest(BaseModel):
+    features: Optional[List[float]] = Field(default=None)
 
 
 class DamageRequest(BaseModel):
@@ -285,6 +310,31 @@ def create_observatory_app(core: Optional[OmnisCore] = None) -> FastAPI:
             },
         )
 
+    @api_router.post("/connectome/neurograft")
+    def modify_connectome_architecture(req: NeuroGraftRequest) -> Dict[str, Any]:
+        org = omnis.get_organism(req.organism_id)
+        if org is None:
+            raise HTTPException(status_code=404, detail="Organism not found")
+        result: Dict[str, Any] = {"operation": req.operation}
+        if req.neuron_model is not None:
+            if req.neuron_model not in VALID_NEURON_MODELS:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid neuron_model '{req.neuron_model}'. Expected one of {VALID_NEURON_MODELS}",
+                )
+            org.connectome.set_neuron_model(req.neuron_model)
+            org.genome["neuron_model"] = req.neuron_model
+            result["neuron_model"] = req.neuron_model
+
+        if req.operation == "neurograft":
+            result.update(org.connectome.inject_neurograft(max_grafts=req.max_grafts))
+        elif req.operation == "fractal":
+            result.update(org.connectome.reseed_fractal_topology(branch_factor=req.branch_factor))
+        elif req.operation != "switch_model":
+            raise HTTPException(status_code=400, detail=f"Unknown connectome operation '{req.operation}'")
+
+        return _connectome_payload(org, extra={"graft_result": result})
+
     # --- C. Memory Observatory ---
     @api_router.get("/memory")
     def get_memory(organism_id: Optional[str] = Query(default=None)) -> Dict[str, Any]:
@@ -307,6 +357,34 @@ def create_observatory_app(core: Optional[OmnisCore] = None) -> FastAPI:
             "replay_overhead_ms": round(overhead_ms, 4),
             "snapshot": org.memory.get_observatory_snapshot(),
         }
+
+    @api_router.post("/memory/hybrid-search")
+    def run_memory_hybrid_search(req: MemoryHybridSearchRequest) -> Dict[str, Any]:
+        org = omnis.get_organism(req.organism_id)
+        if org is None:
+            raise HTTPException(status_code=404, detail="Organism not found")
+        query_emb = req.query_embedding
+        if not query_emb and org.last_cognitive_state is not None:
+            query_emb = list(org.last_cognitive_state.P_t.get("features", []))
+        hits = org.memory.hybrid_retrieve(
+            query_embedding=query_emb,
+            query_text=req.query_text,
+            memory_class=req.memory_class,
+            top_k=req.top_k,
+        )
+        return {
+            "organism_id": org.organism_id,
+            "query_text": req.query_text,
+            "count": len(hits),
+            "results": hits,
+        }
+
+    @api_router.post("/memory/carrier-assay")
+    def run_memory_carrier_assay(organism_id: Optional[str] = Query(default=None)) -> Dict[str, Any]:
+        org = omnis.get_organism(organism_id)
+        if org is None:
+            raise HTTPException(status_code=404, detail="Organism not found")
+        return org.memory.run_carrier_archaeology_assay(org.connectome)
 
     # --- D. Artificial Life Laboratory ---
     @api_router.get("/ecosystem")
@@ -434,6 +512,18 @@ def create_observatory_app(core: Optional[OmnisCore] = None) -> FastAPI:
         conn = lead.connectome if lead is not None else ArtificialOrganism(seed=omnis.config.seed).connectome
         precision = req.precision if req.precision in ("float32", "float16", "int8") else "float32"
         return omnis.hardware.run_connectome_step(conn, [0.5] * 8, backend="pytorch_tensor", precision=precision)
+
+    @api_router.post("/hardware/hyperion-schedule")
+    def run_hyperion_schedule(req: HyperionScheduleRequest) -> Dict[str, Any]:
+        return omnis.hardware.schedule_workload(workload_type=req.workload_type, complexity=req.complexity)
+
+    @api_router.post("/hardware/tether-audit")
+    def run_tether_audit(req: TetherAuditRequest) -> Dict[str, Any]:
+        lead = omnis.get_organism()
+        features = req.features
+        if not features and lead is not None and lead.last_cognitive_state is not None:
+            features = list(lead.last_cognitive_state.P_t.get("features", []))
+        return omnis.supermix.tether_arbitrate({"features": features or [0.45, -0.25, 0.7, -0.2, 0.15, 0.3, 0.1, 0.8]})
 
     # --- H. Development Timeline & Morpheus Regeneration ---
     @api_router.get("/timeline")

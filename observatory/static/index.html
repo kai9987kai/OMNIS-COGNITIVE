@@ -120,6 +120,15 @@
           <button type="button" id="btn-conn-reset-cam" class="btn btn-ghost">Reset View</button>
           <label for="playback-slider" class="inline-label">Checkpoint</label>
           <input id="playback-slider" type="range" min="0" max="0" value="0">
+          <label for="conn-neuron-model" class="inline-label">Soma</label>
+          <select id="conn-neuron-model" class="compact-select" aria-label="Connectome neuron soma model">
+            <option value="rate_coded">Rate-Coded</option>
+            <option value="dual_soma">Dual-Soma (DSAG)</option>
+            <option value="liquid_ltc">Liquid LTC (ODE)</option>
+            <option value="lif">Spiking LIF</option>
+            <option value="conventional">Conventional</option>
+            <option value="threshold">Threshold</option>
+          </select>
           <label for="conn-plasticity-mode" class="inline-label">Rule</label>
           <select id="conn-plasticity-mode" class="compact-select" aria-label="Synaptic plasticity rule">
             <option value="neuromodulated" selected>Neuromodulated (DA/ACh/NE)</option>
@@ -130,6 +139,8 @@
           <label for="conn-reward-slider" class="inline-label">RPE <output id="conn-reward-val" class="mono-inline">+0.85</output></label>
           <input id="conn-reward-slider" type="range" min="-1.5" max="1.5" step="0.05" value="0.85" aria-label="Reward prediction error override">
           <button type="button" id="btn-stimulate-conn" class="btn btn-primary">Pulse &amp; Induce Plasticity</button>
+          <button type="button" id="btn-inject-graft" class="btn btn-violet">Inject NeuroGraft</button>
+          <button type="button" id="btn-fractal-reseed" class="btn btn-ghost">Fractal Circuit</button>
           <button type="button" id="btn-live-plasticity" class="btn btn-ghost">Live Stream: OFF</button>
           <button type="button" id="btn-toggle-signals" class="btn btn-ghost">Pause Pulses</button>
         </div>
@@ -142,6 +153,7 @@
             <span class="hud-chip">||ΔW|| <strong id="hud-dw-norm">0.0000</strong></span>
             <span class="hud-chip">LTP / LTD <strong id="hud-ltp-ltd">0 / 0</strong></span>
             <span class="hud-chip">Neuromod <strong id="hud-neuromod">DA 0.00 · ACh 0.50 · NE 0.20</strong></span>
+            <span class="hud-chip">Emergence CE <strong id="hud-causal-emergence">0.0000</strong></span>
             <span class="hud-chip">SynOps <strong id="hud-synops">0</strong></span>
           </div>
           <div id="connectome-3d-container" class="three-host" aria-label="Interactive 3D neural connectome graph"></div>
@@ -150,6 +162,7 @@
             <span><i class="dot dot-violet"></i> Inhibitory</span>
             <span><i class="dot dot-ltp"></i> LTP (ΔW&gt;0)</span>
             <span><i class="dot dot-ltd"></i> LTD (ΔW&lt;0)</span>
+            <span><i class="dot dot-graft"></i> NeuroGraft Bridge</span>
             <span><i class="dot dot-amber"></i> Live Signal Pulse</span>
             <span class="hint-text">Drag to orbit · Scroll to zoom · Click neuron to inspect or pulse</span>
           </div>
@@ -198,6 +211,7 @@
         <h2 id="heading-memory">MNEMORPH — Adaptive Memory Observatory</h2>
         <div class="panel-actions">
           <button type="button" id="btn-consolidate-mem" class="btn btn-cyan">Consolidate &amp; Replay</button>
+          <button type="button" id="btn-carrier-assay" class="btn btn-violet">Run 2^4 Carrier Archaeology Assay</button>
         </div>
       </div>
 
@@ -214,6 +228,24 @@
           <div id="memory-conflicts-box" class="mono-box">No reward-valence conflicts detected.</div>
         </article>
       </div>
+
+      <div class="split-grid">
+        <article class="glass-card cv-auto-panel">
+          <div class="card-header-row">
+            <h3>NexusSearch Hybrid Retrieval (BM25 + Cosine Vector RRF)</h3>
+            <div class="inline-search-row">
+              <input id="memory-hybrid-query" type="search" class="compact-input" placeholder="e.g. interaction reward episodic" value="interaction reward" aria-label="Hybrid BM25 and Vector RRF search query">
+              <button type="button" id="btn-memory-hybrid-search" class="btn btn-cyan">RRF Search</button>
+            </div>
+          </div>
+          <ul id="memory-hybrid-results" class="mono-list" aria-live="polite"></ul>
+        </article>
+
+        <article class="glass-card cv-auto-panel">
+          <h3>MEMORY-CARRIER-OBSERVATORY — 2^4 Subset Factorial Assay</h3>
+          <div id="carrier-assay-box" class="mono-box">Click 'Run 2^4 Carrier Archaeology Assay' to evaluate all 16 combinations of C1 (Weights), C2 (Traces), C3 (EWC Anchors), and C4 (Neuromodulator Grafts).</div>
+        </article>
+      </div>
     </section>
 
     <!-- D. ARTIFICIAL LIFE LABORATORY -->
@@ -224,6 +256,8 @@
           <label for="spawn-model-select" class="inline-label">Model</label>
           <select id="spawn-model-select" class="sci-select">
             <option value="rate_coded">Rate-Coded</option>
+            <option value="dual_soma">Dual-Soma (DSAG)</option>
+            <option value="liquid_ltc">Liquid LTC (ODE)</option>
             <option value="conventional">Conventional</option>
             <option value="lif">Spiking LIF</option>
             <option value="threshold">Threshold</option>
@@ -308,6 +342,7 @@
           <label for="exp-select" class="inline-label">Experiment</label>
           <select id="exp-select" class="sci-select">
             <option value="plasticity_vs_fixed">Plasticity vs Fixed</option>
+            <option value="dual_soma_graft_vs_baseline">Dual-Soma + NeuroGraft vs Baseline</option>
             <option value="memory_replay_retention">Memory Replay Retention</option>
             <option value="developmental_vs_fixed">Developmental vs Fixed</option>
             <option value="morpheus_regeneration">Morpheus Regeneration</option>
@@ -364,6 +399,8 @@
           <button type="button" id="btn-quantum-opt" class="btn btn-violet">Quantum-Inspired Annealing</button>
           <button type="button" id="btn-parallel-sweep" class="btn btn-cyan">Run Parallel Worker Sweep</button>
           <button type="button" id="btn-pytorch-pass" class="btn btn-ghost">Test PyTorch Tensor Pass</button>
+          <button type="button" id="btn-hyperion-schedule" class="btn btn-amber">HYPERION-20 Dispatch</button>
+          <button type="button" id="btn-tether-audit" class="btn btn-cyan">Tether &amp; FAULTLINE Audit</button>
         </div>
       </div>
 

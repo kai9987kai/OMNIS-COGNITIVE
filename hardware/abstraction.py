@@ -205,6 +205,86 @@ class QuantumInspiredOptimizer:
         }
 
 
+HYPERION_20_SERVICE_CLASSES: List[Dict[str, Any]] = [
+    {"id": "SC01_CPU_SIMD", "domain": "conventional", "backend": "cpu_vector", "cost_weight": 1.0},
+    {"id": "SC02_TENSOR_FP32", "domain": "tensor", "backend": "pytorch_tensor", "cost_weight": 1.25},
+    {"id": "SC03_TENSOR_FP16", "domain": "tensor", "backend": "pytorch_tensor", "cost_weight": 0.9},
+    {"id": "SC04_QUANT_INT8", "domain": "tensor", "backend": "pytorch_tensor", "cost_weight": 0.75},
+    {"id": "SC05_GRAPH_SPARSE", "domain": "connectome", "backend": "cpu_vector", "cost_weight": 0.85},
+    {"id": "SC06_AER_SPIKE_EVENT", "domain": "neuromorphic", "backend": "simulated_neuromorphic_aer", "cost_weight": 0.55},
+    {"id": "SC07_DUAL_SOMA_DSAG", "domain": "neuromorphic", "backend": "simulated_neuromorphic_aer", "cost_weight": 0.7},
+    {"id": "SC08_LIQUID_LTC_ODE", "domain": "neuromorphic", "backend": "cpu_vector", "cost_weight": 1.1},
+    {"id": "SC09_NEUROGRAFT_ROUTER", "domain": "connectome", "backend": "cpu_vector", "cost_weight": 0.95},
+    {"id": "SC10_FRACTAL_LATTICE", "domain": "connectome", "backend": "cpu_vector", "cost_weight": 0.9},
+    {"id": "SC11_ISING_ANNEALER", "domain": "probabilistic", "backend": "quantum_inspired", "cost_weight": 1.4},
+    {"id": "SC12_ACTIVE_INFERENCE_FEP", "domain": "probabilistic", "backend": "cpu_vector", "cost_weight": 1.05},
+    {"id": "SC13_CAUSAL_EMERGENCE_EI", "domain": "experimental", "backend": "cpu_vector", "cost_weight": 1.15},
+    {"id": "SC14_HYBRID_RRF_SEARCH", "domain": "memory", "backend": "cpu_vector", "cost_weight": 0.65},
+    {"id": "SC15_CARRIER_FACTORIAL_16", "domain": "memory", "backend": "cpu_vector", "cost_weight": 1.2},
+    {"id": "SC16_TETHER_INTERVENTION", "domain": "orchestration", "backend": "pytorch_tensor", "cost_weight": 1.1},
+    {"id": "SC17_FAULTLINE_ENSEMBLE", "domain": "orchestration", "backend": "cpu_vector", "cost_weight": 0.95},
+    {"id": "SC18_MORPHEUS_REGEN", "domain": "resilience", "backend": "cpu_vector", "cost_weight": 1.1},
+    {"id": "SC19_ALIFE_SWEEP_POOL", "domain": "distributed", "backend": "parallel_workers", "cost_weight": 1.35},
+    {"id": "SC20_GHOST_HYPOTHESIS_LAB", "domain": "experimental", "backend": "parallel_workers", "cost_weight": 1.5},
+]
+
+
+class Hyperion20Scheduler:
+    """HYPERION-20 heterogeneous 20-service-class workload router and telemetry tracker."""
+
+    def __init__(self) -> None:
+        self.service_classes = list(HYPERION_20_SERVICE_CLASSES)
+        self.dispatches: int = 0
+        self.class_counts: Dict[str, int] = {sc["id"]: 0 for sc in self.service_classes}
+
+    def schedule(self, workload_type: str = "connectome_plasticity", complexity: float = 1.0) -> Dict[str, Any]:
+        t0 = time.perf_counter()
+        w_norm = str(workload_type).lower()
+        mapping = {
+            "connectome_plasticity": "SC07_DUAL_SOMA_DSAG",
+            "dual_soma": "SC07_DUAL_SOMA_DSAG",
+            "liquid_ltc": "SC08_LIQUID_LTC_ODE",
+            "neurograft": "SC09_NEUROGRAFT_ROUTER",
+            "fractal": "SC10_FRACTAL_LATTICE",
+            "quantum_anneal": "SC11_ISING_ANNEALER",
+            "active_inference": "SC12_ACTIVE_INFERENCE_FEP",
+            "causal_emergence": "SC13_CAUSAL_EMERGENCE_EI",
+            "hybrid_search": "SC14_HYBRID_RRF_SEARCH",
+            "carrier_assay": "SC15_CARRIER_FACTORIAL_16",
+            "tether_audit": "SC16_TETHER_INTERVENTION",
+            "faultline": "SC17_FAULTLINE_ENSEMBLE",
+            "morpheus": "SC18_MORPHEUS_REGEN",
+            "parallel_sweep": "SC19_ALIFE_SWEEP_POOL",
+            "ghost_experiment": "SC20_GHOST_HYPOTHESIS_LAB",
+        }
+        chosen_id = mapping.get(w_norm, "SC01_CPU_SIMD")
+        sc = next((c for c in self.service_classes if c["id"] == chosen_id), self.service_classes[0])
+        self.dispatches += 1
+        self.class_counts[sc["id"]] = self.class_counts.get(sc["id"], 0) + 1
+        comp = max(0.1, min(10.0, float(complexity)))
+        est_cost = round(comp * float(sc["cost_weight"]), 4)
+        elapsed_ms = (time.perf_counter() - t0) * 1000.0
+        return {
+            "scheduler": "HYPERION-20",
+            "total_service_classes": len(self.service_classes),
+            "workload_type": workload_type,
+            "assigned_service_class": sc["id"],
+            "domain": sc["domain"],
+            "target_backend": sc["backend"],
+            "estimated_cost_units": est_cost,
+            "total_dispatches": self.dispatches,
+            "scheduling_latency_ms": round(elapsed_ms, 4),
+        }
+
+    def get_summary(self) -> Dict[str, Any]:
+        active = {k: v for k, v in self.class_counts.items() if v > 0}
+        return {
+            "total_service_classes": len(self.service_classes),
+            "total_dispatches": self.dispatches,
+            "active_service_classes": active,
+        }
+
+
 class HardwareManager:
     """Unified hardware abstraction & telemetry interface."""
 
@@ -215,8 +295,12 @@ class HardwareManager:
         self.distributed = ParallelDistributedBackend()
         self.neuromorphic_sim = SimulatedNeuromorphicBackend()
         self.quantum_inspired = QuantumInspiredOptimizer()
+        self.hyperion_scheduler = Hyperion20Scheduler()
         self.gpu_available = self._probe_gpu()
         self.process = psutil.Process(os.getpid())
+
+    def schedule_workload(self, workload_type: str = "connectome_plasticity", complexity: float = 1.0) -> Dict[str, Any]:
+        return self.hyperion_scheduler.schedule(workload_type=workload_type, complexity=complexity)
 
     @staticmethod
     def _probe_gpu() -> bool:
@@ -265,4 +349,5 @@ class HardwareManager:
             "process_memory_mb": round(mem_info.rss / (1024.0 * 1024.0), 2),
             "system_memory_percent": round(float(vm.percent), 2),
             "neuromorphic_simulation": neuromorphic_metrics,
+            "hyperion_20": self.hyperion_scheduler.get_summary(),
         }
