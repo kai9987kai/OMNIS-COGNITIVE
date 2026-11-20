@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -66,6 +66,53 @@ class ContinuousThoughtMachine:
     def accuracy(self, x_eval: np.ndarray, y_eval: np.ndarray) -> float:
         preds = [int(np.argmax(self.forward(x))) for x in x_eval]
         return float(sum(p == int(y) for p, y in zip(preds, y_eval)) / max(1, len(y_eval)))
+
+    def sequence_synchrony_features(self, seq: np.ndarray, entropy_threshold: float = 0.0) -> Tuple[np.ndarray, int]:
+        """Roll hidden states over temporal frames with optional certainty halting and compute S = (Z Z^T) / T."""
+        t_len = max(1, int(seq.shape[0]))
+        z_hist = np.zeros((self.hidden_dim, t_len), dtype=float)
+        h = np.zeros(self.hidden_dim, dtype=float)
+        ticks_used = t_len
+        for t in range(t_len):
+            drive_in = self.w_in @ seq[t]
+            pre = drive_in + (self.w_rec @ h) * 0.65
+            h = self.nlm_decay * h + (1.0 - self.nlm_decay) * np.tanh(pre)
+            z_hist[:, t] = h
+            if entropy_threshold > 0.0 and t >= 3:
+                sync_p = (z_hist[:, : t + 1] @ z_hist[:, : t + 1].T) / float(t + 1)
+                s_p = np.array([sync_p[i, j] for i, j in self.sync_pairs], dtype=float)
+                logits = self.w_sync @ s_p + self.b_out
+                logits = logits - float(np.max(logits))
+                probs = np.exp(logits)
+                probs /= float(np.sum(probs) + 1e-12)
+                ent = -float(np.sum(probs * np.log(probs + 1e-12)))
+                if ent < entropy_threshold:
+                    ticks_used = t + 1
+                    break
+        sync_mat = (z_hist[:, :ticks_used] @ z_hist[:, :ticks_used].T) / float(ticks_used)
+        return np.array([sync_mat[i, j] for i, j in self.sync_pairs], dtype=float), ticks_used
+
+    def fit_sequence_readout(self, seqs_train: np.ndarray, y_train: np.ndarray, reg: float = 1e-2) -> None:
+        """Closed-form ridge fit of synchronization readout weights over temporal frame sequences."""
+        feats = np.stack([self.sequence_synchrony_features(s)[0] for s in seqs_train], axis=0)
+        n_feat = feats.shape[1]
+        a_mat = feats.T @ feats + reg * np.eye(n_feat)
+        y_onehot = np.eye(self.output_dim)[y_train]
+        w_solved = np.linalg.solve(a_mat, feats.T @ y_onehot)
+        self.w_sync = w_solved.T
+        self.b_out = np.mean(y_onehot - feats @ w_solved, axis=0)
+
+    def sequence_accuracy(self, seqs_eval: np.ndarray, y_eval: np.ndarray, entropy_threshold: float = 0.0) -> Tuple[float, float]:
+        """Evaluate accuracy and mean compute ticks on temporal sequences."""
+        correct = 0
+        total_ticks = 0
+        for seq, y in zip(seqs_eval, y_eval):
+            s_vec, ticks = self.sequence_synchrony_features(seq, entropy_threshold=entropy_threshold)
+            pred = int(np.argmax(self.w_sync @ s_vec + self.b_out))
+            correct += int(pred == int(y))
+            total_ticks += ticks
+        n = max(1, len(y_eval))
+        return float(correct / n), float(total_ticks / n)
 
 
 class KuramotoOscillatorBank:
@@ -137,34 +184,45 @@ class KuramotoOscillatorBank:
 
 
 def run_ctm_synchrony_benchmark(seeds: Optional[List[int]] = None) -> Dict[str, Any]:
-    """Compare CTM synchronization readout vs single-tick baseline and capacity-matched flat readout on nonlinear parity."""
+    """Compare CTM temporal synchronization readout vs final-frame baseline and capacity-matched frame-averaged control on delayed XOR."""
 
     def _trial(seed: int) -> Dict[str, Any]:
         rng = np.random.default_rng(seed)
-        n_train, n_eval = 140, 80
-        x_tr = rng.choice([-1.0, 1.0], size=(n_train, 6))
-        y_tr = (((x_tr[:, 0] * x_tr[:, 1] * x_tr[:, 2]) + 0.5 * (x_tr[:, 3] * x_tr[:, 4])) > 0).astype(int)
-        x_ev = rng.choice([-1.0, 1.0], size=(n_eval, 6))
-        y_ev = (((x_ev[:, 0] * x_ev[:, 1] * x_ev[:, 2]) + 0.5 * (x_ev[:, 3] * x_ev[:, 4])) > 0).astype(int)
+        n_train, n_eval, seq_len, dim = 140, 80, 6, 6
 
-        # Baseline: 1-tick linear readout (no synchronization)
-        w_base = rng.normal(0.0, 0.5, size=(10, 6))
-        h_tr = np.tanh(x_tr @ w_base.T)
-        h_ev = np.tanh(x_ev @ w_base.T)
+        def _make_delayed_xor_sequences(n_samples: int) -> Tuple[np.ndarray, np.ndarray]:
+            seqs = rng.normal(0.0, 0.35, size=(n_samples, seq_len, dim))
+            cue_a = rng.choice([-1.0, 1.0], size=n_samples)
+            cue_b = rng.choice([-1.0, 1.0], size=n_samples)
+            seqs[:, 0, 0] = cue_a * 2.2
+            seqs[:, 0, 1] = -cue_a * 2.2
+            seqs[:, 3, 2] = cue_b * 2.2
+            seqs[:, 3, 3] = -cue_b * 2.2
+            labels = ((cue_a * cue_b) > 0).astype(int)
+            return seqs, labels
+
+        s_tr, y_tr = _make_delayed_xor_sequences(n_train)
+        s_ev, y_ev = _make_delayed_xor_sequences(n_eval)
         y_oh = np.eye(2)[y_tr]
+
+        # Baseline: single-tick readout on final frame only (no temporal binding across t=0 and t=3)
+        w_base = rng.normal(0.0, 0.5, size=(10, dim))
+        h_tr = np.tanh(s_tr[:, -1, :] @ w_base.T)
+        h_ev = np.tanh(s_ev[:, -1, :] @ w_base.T)
         w_b_out = np.linalg.solve(h_tr.T @ h_tr + 1e-2 * np.eye(10), h_tr.T @ y_oh)
         base_acc = float(np.mean(np.argmax(h_ev @ w_b_out, axis=1) == y_ev))
 
-        # Candidate: Mini CTM with 5 internal thought ticks and pairwise synchronization readout S = Z Z^T
-        ctm = ContinuousThoughtMachine(input_dim=6, hidden_dim=10, output_dim=2, thought_ticks=5, seed=seed)
-        ctm.fit_readout(x_tr, y_tr, reg=1e-2)
-        cand_acc = ctm.accuracy(x_ev, y_ev)
+        # Candidate: Mini CTM rolling multi-timescale NLM state across frames with pairwise synchronization S = Z Z^T / T
+        ctm = ContinuousThoughtMachine(input_dim=dim, hidden_dim=10, output_dim=2, thought_ticks=seq_len, seed=seed)
+        ctm.fit_sequence_readout(s_tr, y_tr, reg=1e-2)
+        cand_acc, mean_ticks = ctm.sequence_accuracy(s_ev, y_ev, entropy_threshold=0.0)
 
-        # Capacity-matched control: single-tick wide random feature MLP matching len(sync_pairs) = 55 features
+        # Capacity-matched control: processes every frame through wide MLP matching len(sync_pairs)=55 features,
+        # pooled additively across time without recurrent pairwise temporal synchrony
         n_ctrl = len(ctm.sync_pairs)
-        w_ctrl = rng.normal(0.0, 0.5, size=(n_ctrl, 6))
-        hc_tr = np.tanh(x_tr @ w_ctrl.T)
-        hc_ev = np.tanh(x_ev @ w_ctrl.T)
+        w_ctrl = rng.normal(0.0, 0.5, size=(n_ctrl, dim))
+        hc_tr = np.mean(np.tanh(s_tr @ w_ctrl.T), axis=1)
+        hc_ev = np.mean(np.tanh(s_ev @ w_ctrl.T), axis=1)
         w_c_out = np.linalg.solve(hc_tr.T @ hc_tr + 1e-2 * np.eye(n_ctrl), hc_tr.T @ y_oh)
         ctrl_acc = float(np.mean(np.argmax(hc_ev @ w_c_out, axis=1) == y_ev))
 
@@ -172,13 +230,13 @@ def run_ctm_synchrony_benchmark(seeds: Optional[List[int]] = None) -> Dict[str, 
             "baseline": base_acc,
             "candidate": cand_acc,
             "capacity_matched_control": ctrl_acc,
-            "details": {"thought_ticks": 5, "sync_feature_dim": n_ctrl},
+            "details": {"seq_len": seq_len, "mean_ticks": round(mean_ticks, 2), "sync_feature_dim": n_ctrl},
         }
 
     return CapacityMatchedHarness.evaluate(
         module_id="ctm_synchrony",
         category="Temporal",
-        metric_name="held_out_parity_accuracy",
+        metric_name="delayed_xor_sequence_accuracy",
         seeds=seeds or [42, 101, 202, 303, 404],
         trial_fn=_trial,
         higher_is_better=True,

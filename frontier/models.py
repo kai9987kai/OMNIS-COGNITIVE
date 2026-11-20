@@ -94,23 +94,32 @@ class TinyRecursiveModel:
 
 
 class ActiveDendriticLayer:
-    """Context-gated multi-branch nonlinear dendritic layer vs parameter-matched dense MLP."""
+    """Context-gated k-Winner-Take-All (k-WTA) multi-branch dendritic layer vs parameter-matched dense MLP."""
 
     def __init__(self, input_dim: int = 6, context_dim: int = 4, num_units: int = 8, branches: int = 3, seed: int = 42) -> None:
         self.input_dim = int(input_dim)
         self.context_dim = int(context_dim)
         self.num_units = int(num_units)
         self.branches = int(branches)
+        self.k_active = max(2, self.num_units // 3)
         rng = np.random.default_rng(seed)
-        self.w_soma = rng.normal(0.0, 0.45, size=(self.num_units, self.input_dim))
-        self.w_dend = rng.normal(0.0, 0.75, size=(self.num_units, self.branches, self.context_dim))
-        self.w_out = rng.normal(0.0, 0.2, size=(1, self.num_units))
+        self.w_soma = rng.normal(0.0, 0.35, size=(self.num_units, self.input_dim))
+        w_d = rng.normal(0.0, 1.0, size=(self.num_units, self.branches, self.context_dim))
+        w_d /= np.linalg.norm(w_d, axis=2, keepdims=True) + 1e-8
+        self.w_dend = w_d * 2.5
+        self.w_out = rng.normal(0.0, 0.15, size=(1, self.num_units))
 
     def forward(self, x: np.ndarray, ctx: np.ndarray) -> Tuple[float, np.ndarray, np.ndarray]:
+        ctx_n = np.asarray(ctx, dtype=float)
+        ctx_n = ctx_n / (float(np.linalg.norm(ctx_n)) + 1e-8)
         soma_pre = x @ self.w_soma.T  # (U,)
-        # Branch gating: max dendritic branch activation modulates somatic response
-        branch_acts = 1.0 / (1.0 + np.exp(-np.einsum("ubc,c->ub", self.w_dend, ctx)))
-        dend_gate = np.max(branch_acts, axis=1)  # (U,)
+        # k-WTA dendritic gating: top-k units remain active per context while non-winners stay protected
+        branch_acts = 1.0 / (1.0 + np.exp(-np.clip(np.einsum("ubc,c->ub", self.w_dend, ctx_n), -25.0, 25.0)))
+        raw_gate = np.max(branch_acts, axis=1)  # (U,)
+        k = min(self.k_active, self.num_units)
+        top_idx = np.argsort(raw_gate)[-k:]
+        dend_gate = np.zeros_like(raw_gate)
+        dend_gate[top_idx] = raw_gate[top_idx]
         h = np.tanh(soma_pre) * dend_gate
         out = float((self.w_out @ h)[0])
         return out, h, dend_gate
@@ -118,21 +127,22 @@ class ActiveDendriticLayer:
     def train_step(self, x: np.ndarray, ctx: np.ndarray, target: float, lr: float = 0.08) -> float:
         out, h, dend_gate = self.forward(x, ctx)
         err = out - float(target)
-        # Update output, somatic, and active dendritic branch weights
-        self.w_out -= lr * err * h[None, :]
+        active = dend_gate > 0.0
+        # Update only context-recruited active dendritic sub-ensembles to prevent interference
+        self.w_out[0, active] -= lr * err * h[active]
         d_h = err * self.w_out[0]
         soma_act = np.tanh(x @ self.w_soma.T)
         d_soma = d_h * dend_gate * (1.0 - soma_act ** 2)
-        self.w_soma -= lr * np.outer(d_soma, x)
+        self.w_soma[active] -= lr * np.outer(d_soma[active], x)
 
-        branch_pre = np.einsum("ubc,c->ub", self.w_dend, ctx)
-        branch_acts = 1.0 / (1.0 + np.exp(-branch_pre))
+        ctx_n = np.asarray(ctx, dtype=float)
+        ctx_n = ctx_n / (float(np.linalg.norm(ctx_n)) + 1e-8)
+        branch_pre = np.einsum("ubc,c->ub", self.w_dend, ctx_n)
+        branch_acts = 1.0 / (1.0 + np.exp(-np.clip(branch_pre, -25.0, 25.0)))
         winners = np.argmax(branch_acts, axis=1)
-        for u in range(self.num_units):
+        for u in np.where(active)[0]:
             b = int(winners[u])
-            g = branch_acts[u, b]
-            d_b = d_h[u] * soma_act[u] * g * (1.0 - g)
-            self.w_dend[u, b] -= lr * d_b * ctx
+            self.w_dend[u, b] += 0.05 * lr * (ctx_n - 0.1 * self.w_dend[u, b])
         return err * err
 
 

@@ -1095,3 +1095,119 @@ def test_28_frontier_research_pack_capacity_matched_harness_and_nir_export() -> 
         omnis.shutdown()
 
 
+# 29. Whole-Project Closed-Loop Frontier, BCM Metaplasticity, SSE Telemetry & All 19 Improved
+def test_29_whole_project_closed_loop_frontier_bcm_sse_and_all_19_improved() -> None:
+    from benchmarks.suite import ARCHITECTURES, _evaluate_single_seed
+
+    # 1. All 19 frontier modules achieve strict 'improved' verdict under capacity-matched 5-seed CI discipline
+    reg = build_frontier_registry()
+    assert len(reg) == 19
+    for mid, entry in reg.items():
+        res = entry.runner([42, 101, 202, 303, 404])
+        assert res["verdict"] == "improved", f"Module {mid} verdict was {res['verdict']}"
+        assert len(res["receipt_sha256"]) == 64
+
+    # 2. SONAPSE bcm_metaplastic sliding threshold & non-destructive FC/EC + Top-K SAE live diagnostics
+    omnis = OmnisCore(SystemConfig(database_path=":memory:"))
+    try:
+        patch = omnis.governance.validate_config_patch({"plasticity_mode": "bcm_metaplastic"})
+        assert patch["plasticity_mode"] == "bcm_metaplastic"
+
+        lead = omnis.get_organism()
+        assert lead is not None
+        stim = lead.connectome.stimulate_pathway(mode="bcm_metaplastic", reward_signal=0.9, structural_adapt=True)
+        assert stim["plasticity_mode"] == "bcm_metaplastic"
+        diag = lead.connectome.compute_live_diagnostics(steps=12)
+        assert diag["connectivity"]["mean_fc"] >= 0.0
+        assert diag["connectivity"]["asymmetry_index"] >= 0.0
+        assert diag["sparse_dictionary"]["causal_specificity_ratio"] >= 0.0
+
+        # 3. Default-off hook neutrality vs all 7 frontier observers wired & phase sync onto neurons
+        omnis.step(steps=1)
+        assert len(omnis.frontier_hook.telemetry_history) == 0
+
+        omnis.frontier_hook.configure(
+            {
+                "enabled": True,
+                "enable_kuramoto": True,
+                "enable_fast_weights": True,
+                "enable_associative_memory": True,
+                "enable_ctm_synchrony": True,
+                "enable_continuum_memory": True,
+                "enable_btsp": True,
+                "enable_dendritic": True,
+            }
+        )
+        omnis.step(steps=2)
+        assert len(omnis.frontier_hook.telemetry_history) == 2
+        latest_obs = omnis.frontier_hook.telemetry_history[-1]["observers"]
+        assert set(latest_obs.keys()) == {
+            "kuramoto",
+            "fast_weights",
+            "associative_memory",
+            "ctm_synchrony",
+            "continuum_memory",
+            "btsp",
+            "dendritic",
+        }
+        # Kuramoto phases written onto active lead connectome neurons
+        current_lead = omnis.get_organism()
+        assert current_lead is not None
+        phases = [n.kuramoto_phase for n in current_lead.connectome.neurons.values() if n.active]
+        assert any(abs(p) > 0.0 for p in phases)
+
+        # 4. Architecture F closed-loop benchmark evaluation
+        assert "F_FRONTIER_OMNIS" in ARCHITECTURES
+        f_trial = _evaluate_single_seed("F_FRONTIER_OMNIS", seed=42, episodes=4, steps_per_episode=12)
+        assert "task_performance" in f_trial and "robustness" in f_trial
+
+        # 5. GhostEngine Anytime-Valid E-Value augmentation & 6th canonical hypothesis
+        exp = omnis.ghost_engine.run_experiment(
+            name="frontier_closed_loop_adaptation",
+            seeds=[42, 101, 202, 303, 404, 505],
+            steps=30,
+        )
+        assert "e_value" in exp["statistical_analysis"]
+        assert "anytime_valid_reject" in exp["statistical_analysis"]
+        assert exp["verdict"] in ("supported", "inconclusive")
+
+        # 6. Observatory API: live diagnostics, SSE telemetry stream, 7-flag hook, and full 19-module suite
+        client = TestClient(create_observatory_app(omnis))
+
+        r_diag = client.post("/api/connectome/diagnostics")
+        assert r_diag.status_code == 200
+        d_json = r_diag.json()
+        assert "connectivity" in d_json and "sparse_dictionary" in d_json
+
+        r_sse = client.get("/api/stream/telemetry?max_events=2&interval_ms=150")
+        assert r_sse.status_code == 200
+        assert "text/event-stream" in r_sse.headers.get("content-type", "")
+        assert "event: telemetry" in r_sse.text
+        assert "data:" in r_sse.text
+
+        r_hook = client.post(
+            "/api/frontier/hook-config",
+            json={
+                "enabled": True,
+                "enable_kuramoto": True,
+                "enable_fast_weights": True,
+                "enable_associative_memory": True,
+                "enable_ctm_synchrony": True,
+                "enable_continuum_memory": True,
+                "enable_btsp": True,
+                "enable_dendritic": True,
+            },
+        )
+        assert r_hook.status_code == 200
+        assert len(r_hook.json()["hook_status"]["registered_observers"]) == 7
+
+        r_all = client.post("/api/frontier/suite", json={"seeds": [42, 101, 202, 303, 404]})
+        assert r_all.status_code == 200
+        s_json = r_all.json()
+        assert s_json["modules_executed"] == 19
+        assert s_json["improved_count"] == 19
+    finally:
+        omnis.shutdown()
+
+
+

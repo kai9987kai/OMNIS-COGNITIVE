@@ -145,6 +145,7 @@
           <label for="conn-plasticity-mode" class="inline-label">Rule</label>
           <select id="conn-plasticity-mode" class="compact-select" aria-label="Synaptic plasticity rule">
             <option value="neuromodulated" selected>Neuromodulated (DA/ACh/NE)</option>
+            <option value="bcm_metaplastic">BCM Metaplastic (Sliding θ)</option>
             <option value="three_factor">Three-Factor (R-STDP)</option>
             <option value="hybrid">Hybrid (Three-Factor + Hebbian)</option>
             <option value="hebbian">Hebbian (Co-activation)</option>
@@ -154,6 +155,8 @@
           <button type="button" id="btn-stimulate-conn" class="btn btn-primary">Pulse &amp; Induce Plasticity</button>
           <button type="button" id="btn-inject-graft" class="btn btn-violet">Inject NeuroGraft</button>
           <button type="button" id="btn-fractal-reseed" class="btn btn-ghost">Fractal Circuit</button>
+          <button type="button" id="btn-conn-diagnostics" class="btn btn-cyan">Causal &amp; SAE Audit</button>
+          <button type="button" id="btn-toggle-phase-overlay" class="btn btn-ghost">Phase Overlay: ON</button>
           <button type="button" id="btn-live-plasticity" class="btn btn-ghost">Live Stream: OFF</button>
           <button type="button" id="btn-toggle-signals" class="btn btn-ghost">Pause Pulses</button>
         </div>
@@ -168,6 +171,7 @@
             <span class="hud-chip">Neuromod <strong id="hud-neuromod">DA 0.00 · ACh 0.50 · NE 0.20</strong></span>
             <span class="hud-chip">Emergence CE <strong id="hud-causal-emergence">0.0000</strong></span>
             <span class="hud-chip">SynOps <strong id="hud-synops">0</strong></span>
+            <span class="hud-chip">SSE <strong id="hud-sse-status">IDLE</strong></span>
           </div>
           <div id="connectome-3d-container" class="three-host" aria-label="Interactive 3D neural connectome graph"></div>
           <div class="legend-bar">
@@ -187,6 +191,9 @@
 
           <h3>Selected Node / Connection</h3>
           <div id="node-inspector" class="mono-box">Click any neuron in the 3D graph to inspect membrane potential u_i, activation a_i, model, and synaptic weights.</div>
+
+          <h3>Live FC/EC Connectivity &amp; Top-K SAE</h3>
+          <div id="connectome-diagnostics-box" class="mono-box">Click 'Causal &amp; SAE Audit' to measure live Functional vs. Effective Connectivity asymmetry and Top-K SAE causal feature specificity.</div>
 
           <h3>Cognitive Pipeline State C_t</h3>
           <pre id="cognitive-state-pre" class="mono-pre"></pre>
@@ -520,8 +527,25 @@
               <input type="checkbox" id="chk-hook-assoc">
               <span>Hopfield Assoc</span>
             </label>
+            <label class="checkbox-pill" for="chk-hook-ctm">
+              <input type="checkbox" id="chk-hook-ctm">
+              <span>CTM Synchrony</span>
+            </label>
+            <label class="checkbox-pill" for="chk-hook-continuum">
+              <input type="checkbox" id="chk-hook-continuum">
+              <span>Continuum Mem</span>
+            </label>
+            <label class="checkbox-pill" for="chk-hook-btsp">
+              <input type="checkbox" id="chk-hook-btsp">
+              <span>BTSP Binary</span>
+            </label>
+            <label class="checkbox-pill" for="chk-hook-dendritic">
+              <input type="checkbox" id="chk-hook-dendritic">
+              <span>Active Dendrites</span>
+            </label>
             <button type="button" id="btn-frontier-hook-apply" class="btn btn-ghost">Apply Hook Config</button>
           </div>
+          <div id="frontier-hook-telemetry" class="mono-box mt-sm">Neutral hook inactive (0 core overhead). Enable hook &amp; step simulation to stream live observer telemetry.</div>
         </article>
 
         <article class="glass-card cv-auto-panel">

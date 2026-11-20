@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
 import os
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Query
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Query, Request
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -116,6 +118,9 @@ class FrontierHookConfigRequest(BaseModel):
     enable_fast_weights: Optional[bool] = None
     enable_associative_memory: Optional[bool] = None
     enable_ctm_synchrony: Optional[bool] = None
+    enable_continuum_memory: Optional[bool] = None
+    enable_btsp: Optional[bool] = None
+    enable_dendritic: Optional[bool] = None
 
 
 class KuramotoStepRequest(BaseModel):
@@ -358,6 +363,24 @@ def create_observatory_app(core: Optional[OmnisCore] = None) -> FastAPI:
             raise HTTPException(status_code=400, detail=f"Unknown connectome operation '{req.operation}'")
 
         return _connectome_payload(org, extra={"graft_result": result})
+
+    @api_router.post("/connectome/diagnostics")
+    def get_connectome_diagnostics(
+        organism_id: Optional[str] = Query(default=None),
+        steps: int = Query(default=16, ge=8, le=64),
+    ) -> Dict[str, Any]:
+        org = omnis.get_organism(organism_id)
+        if org is None:
+            raise HTTPException(status_code=404, detail="Organism not found")
+        diag = org.connectome.compute_live_diagnostics(steps=steps)
+        km = omnis.kuramoto_bank.measure()
+        return {
+            "organism_id": org.organism_id,
+            "neuron_model": org.connectome.neuron_model,
+            "plasticity_mode": org.genome.get("plasticity_mode", omnis.config.plasticity_mode),
+            "kuramoto_order_parameter_R": km.get("order_parameter_R", 0.0),
+            **diag,
+        }
 
     # --- C. Memory Observatory ---
     @api_router.get("/memory")
@@ -642,24 +665,8 @@ def create_observatory_app(core: Optional[OmnisCore] = None) -> FastAPI:
 
     @api_router.post("/frontier/suite")
     def run_frontier_suite(req: FrontierSuiteRequest) -> Dict[str, Any]:
-        target_ids = req.module_ids or [
-            "ctm_synchrony",
-            "kuramoto_binding",
-            "continuum_memory",
-            "btsp_binary_memory",
-            "associative_memory",
-            "fast_weights",
-            "tiny_recursive_model",
-            "dendritic_layer",
-            "muon_optimizer",
-            "rigl_sparse_training",
-            "topk_sparse_dictionary",
-            "anytime_valid_statistics",
-            "verifier_gated_qd_search",
-            "hodgkin_huxley_cable",
-            "nir_interchange_export",
-        ]
-        seeds = req.seeds or [42, 101, 202]
+        target_ids = req.module_ids or list(omnis.frontier_registry.keys())
+        seeds = req.seeds or [42, 101, 202, 303, 404]
         results: List[Dict[str, Any]] = []
         for mid in target_ids:
             entry = omnis.frontier_registry.get(mid)
@@ -695,6 +702,10 @@ def create_observatory_app(core: Optional[OmnisCore] = None) -> FastAPI:
         omnis.kuramoto_bank.coupling_k = float(req.coupling_k)
         omnis.kuramoto_bank.bind_connectome(org.connectome)
         res = omnis.kuramoto_bank.step(steps=req.steps)
+        active_ids = sorted(n.neuron_id for n in org.connectome.neurons.values() if n.active)
+        for idx, nid in enumerate(active_ids):
+            if idx < len(omnis.kuramoto_bank.theta):
+                org.connectome.neurons[nid].kuramoto_phase = round(float(omnis.kuramoto_bank.theta[idx]), 4)
         return {"organism_id": org.organism_id, **res}
 
     @api_router.post("/frontier/hook-config")
@@ -702,6 +713,43 @@ def create_observatory_app(core: Optional[OmnisCore] = None) -> FastAPI:
         updates = {k: v for k, v in req.model_dump().items() if v is not None}
         spec = omnis.frontier_hook.configure(updates)
         return {"spec": spec, "hook_status": omnis.frontier_hook.get_status()}
+
+    @api_router.get("/stream/telemetry")
+    async def stream_telemetry(
+        request: Request,
+        organism_id: Optional[str] = Query(default=None),
+        interval_ms: int = Query(default=600, ge=150, le=5000),
+        max_events: int = Query(default=0, ge=0, le=500),
+    ) -> StreamingResponse:
+        async def _event_generator():
+            emitted = 0
+            while True:
+                if await request.is_disconnected():
+                    break
+                org = omnis.get_organism(organism_id)
+                conn = org.connectome if org is not None else None
+                payload = {
+                    "tick": omnis.tick,
+                    "status": "PAUSED" if omnis.paused else "OPERATIONAL",
+                    "mean_fitness": round(omnis.ecosystem.mean_fitness(), 4),
+                    "active_organisms": len(omnis.ecosystem.organisms),
+                    "lead_organism_id": org.organism_id if org else None,
+                    "recent_signals_count": len(conn.recent_signals) if conn else 0,
+                    "neuromodulators": dict(conn.neuromodulators) if conn else {},
+                    "last_weight_delta_norm": round(float(conn.last_weight_delta_norm), 5) if conn else 0.0,
+                    "frontier_hook": omnis.frontier_hook.get_status(),
+                }
+                yield f"event: telemetry\ndata: {json.dumps(payload)}\n\n"
+                emitted += 1
+                if max_events > 0 and emitted >= max_events:
+                    break
+                await asyncio.sleep(interval_ms / 1000.0)
+
+        return StreamingResponse(
+            _event_generator(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
 
     app.include_router(api_router)
     return app

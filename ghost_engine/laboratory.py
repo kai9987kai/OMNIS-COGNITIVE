@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import math
 from typing import Any, Dict, List, Optional
 import uuid
 
@@ -11,6 +12,7 @@ from core.math_utils import compare_distributions
 from core.persistence import OmnisDatabase
 from core.schemas import SCHEMA_VERSION, utc_now_iso
 from diamond.environment import DiamondWorld
+from frontier.methodology import AnytimeValidTester
 from morpheus.regenerator import MorpheusRegenerator
 from neurohive.organism import ArtificialOrganism
 
@@ -175,6 +177,7 @@ class GhostEngine:
             "developmental_vs_fixed": "Full OMNIS developmental adaptation outperforms fixed minimal architecture.",
             "morpheus_regeneration": "Morpheus structural & plasticity regeneration improves Recovery(t) over unassisted lesion.",
             "dual_soma_graft_vs_baseline": "Dual-Soma (DSAG) + NeuroGraft + Neuromodulated plasticity outperforms fixed conventional reservoir.",
+            "frontier_closed_loop_adaptation": "Dual-Soma + NeuroGraft + BCM Metaplastic plasticity outperforms fixed conventional baseline.",
         }
         hyp = hypothesis or default_hypotheses.get(name, "Treatment configuration improves target dependent variable.")
 
@@ -210,6 +213,23 @@ class GhostEngine:
                 "neuron_model": "dual_soma",
                 "inject_grafts": True,
                 "plasticity_mode": "neuromodulated",
+            }
+        elif name == "frontier_closed_loop_adaptation":
+            control_cfg = {
+                "enable_plasticity": False,
+                "enable_memory_ops": False,
+                "enable_structural_adaptation": False,
+                "neuron_model": "conventional",
+                "inject_grafts": False,
+                "plasticity_mode": "three_factor",
+            }
+            treatment_cfg = {
+                "enable_plasticity": True,
+                "enable_memory_ops": True,
+                "enable_structural_adaptation": True,
+                "neuron_model": "dual_soma",
+                "inject_grafts": True,
+                "plasticity_mode": "bcm_metaplastic",
             }
         else:
             control_cfg = {"enable_plasticity": False, "enable_memory_ops": False, "enable_structural_adaptation": False}
@@ -259,6 +279,16 @@ class GhostEngine:
             alpha=max_p_value,
             min_effect_size=min_effect_size,
         )
+        diffs = [float(t - c) for t, c in zip(treatment_vals, control_vals)]
+        if len(diffs) > 1:
+            mean_d = sum(diffs) / float(len(diffs))
+            std_d = math.sqrt(sum((d - mean_d) ** 2 for d in diffs) / float(len(diffs) - 1))
+        else:
+            std_d = 0.25
+        e_res = AnytimeValidTester(alpha=max_p_value, sigma=max(0.15, std_d)).test_stream(diffs)
+        stats["e_value"] = e_res["final_e_value"]
+        stats["max_e_value"] = e_res["max_e_value"]
+        stats["anytime_valid_reject"] = e_res["rejected"]
         criteria_met = bool(stats["significant"] and stats["mean_diff"] > min_mean_diff)
         if criteria_met:
             verdict = "supported"

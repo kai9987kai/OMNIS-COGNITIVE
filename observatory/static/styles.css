@@ -294,7 +294,7 @@
     overflow-x: auto;
     gap: 0.25rem;
     padding: 0.4rem 1.25rem;
-    background: rgba(9, 15, 34, 0.85);
+    background: var(--surface-glass);
     border-block-end: 1px solid var(--border-subtle);
     scroll-snap-type: inline proximity;
   }
@@ -339,8 +339,8 @@
     font-family: var(--font-mono);
     font-size: 0.76rem;
     color: var(--text-muted);
-    background: rgba(5, 10, 24, 0.72);
-    border-block-end: 1px solid rgba(255, 255, 255, 0.05);
+    background: var(--surface-elevated);
+    border-block-end: 1px solid var(--border-subtle);
   }
 
   main {
@@ -388,7 +388,7 @@
   .btn-violet {
     border-color: rgba(157, 107, 255, 0.5);
     background: rgba(157, 107, 255, 0.16);
-    color: #d6c0ff;
+    color: var(--violet);
   }
 
   .btn-amber {
@@ -724,7 +724,7 @@
     padding: 0.45rem 0.6rem;
     border: 1px solid var(--border-subtle);
     border-radius: 10px;
-    background: rgba(7, 13, 24, 0.72);
+    background: var(--surface-glass);
   }
 
   .hud-chip {
@@ -733,8 +733,8 @@
     gap: 0.35rem;
     padding: 0.2rem 0.55rem;
     border-radius: 999px;
-    border: 1px solid rgba(56, 189, 248, 0.22);
-    background: rgba(15, 25, 44, 0.85);
+    border: 1px solid var(--border-subtle);
+    background: var(--surface-elevated);
     font-family: var(--font-mono);
     font-size: 0.74rem;
     color: var(--text-muted);
@@ -742,7 +742,7 @@
   }
 
   .hud-chip strong {
-    color: var(--accent-cyan, #38e2ff);
+    color: var(--cyan);
     font-weight: 600;
   }
 
@@ -759,7 +759,7 @@
   .mono-inline {
     font-family: var(--font-mono);
     font-size: 0.74rem;
-    color: var(--accent-cyan, #38e2ff);
+    color: var(--cyan);
     font-variant-numeric: tabular-nums;
   }
 
@@ -889,11 +889,16 @@
   :root:has(> head > meta[name="color-scheme"][content="light"]) .theme-toggle-btn .theme-opt-light { display: none; }
   :root:has(> head > meta[name="color-scheme"][content="light"]) .theme-toggle-btn .theme-opt-dark { display: inline; }
 
-  /* Keep canvas plots dark-instrumented across themes for crisp signal contrast */
+  /* Keep canvas plots & JSON readouts dark-instrumented across themes for crisp signal contrast */
   #connectome-3d-container,
   #world-canvas,
-  #frontier-phase-canvas {
+  #frontier-phase-canvas,
+  .oscilloscope-canvas,
+  .mono-pre {
+    color-scheme: only dark;
     background: #060c16;
+    color: var(--text-primary-dark);
+    accent-color: var(--cyan-dark);
   }
 
   @media (prefers-reduced-motion: no-preference) {

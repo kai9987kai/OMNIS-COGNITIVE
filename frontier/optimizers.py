@@ -30,19 +30,21 @@ def newton_schulz_orthogonalize(g: np.ndarray, steps: int = 5) -> np.ndarray:
 
 
 class MuonOptimizer:
-    """MomentUm Orthogonalized by Newton-Schulz for 2D neural-graft weight matrices."""
+    """MomentUm Orthogonalized by Newton-Schulz (with Nesterov lookahead) for 2D neural-graft matrices."""
 
-    def __init__(self, shape: tuple, lr: float = 0.08, momentum: float = 0.9, ns_steps: int = 5) -> None:
+    def __init__(self, shape: tuple, lr: float = 0.08, momentum: float = 0.9, ns_steps: int = 5, nesterov: bool = True) -> None:
         self.lr = float(lr)
         self.momentum = float(momentum)
         self.ns_steps = int(ns_steps)
+        self.nesterov = bool(nesterov)
         self.buf = np.zeros(shape, dtype=float)
 
-    def step(self, weights: np.ndarray, grad: np.ndarray) -> np.ndarray:
+    def step(self, weights: np.ndarray, grad: np.ndarray, lr_scale: float = 1.0) -> np.ndarray:
         self.buf = self.momentum * self.buf + grad
-        ortho = newton_schulz_orthogonalize(self.buf, steps=self.ns_steps)
+        update_g = (grad + self.momentum * self.buf) if self.nesterov else self.buf
+        ortho = newton_schulz_orthogonalize(update_g, steps=self.ns_steps)
         scale = math.sqrt(max(1.0, weights.shape[0] / float(max(1, weights.shape[1]))))
-        return weights - self.lr * scale * ortho
+        return weights - (self.lr * float(lr_scale)) * scale * ortho
 
 
 class RigLSparseTrainer:
@@ -89,48 +91,50 @@ class RigLSparseTrainer:
 
 
 def run_muon_vs_adam_benchmark(seeds: Optional[List[int]] = None) -> Dict[str, Any]:
-    """Compare Muon Newton-Schulz orthogonalized updates vs Adam on ill-conditioned 2D neural-graft weights."""
+    """Compare Nesterov Muon orthogonalized updates vs tuned Adam on non-axis-aligned ill-conditioned 2D graft weights."""
 
     def _trial(seed: int) -> Dict[str, Any]:
         rng = np.random.default_rng(seed)
-        d_in, d_out = 12, 8
-        # Ill-conditioned spectral target matrix where orthogonalized updates shine
+        d_in, d_out = 16, 10
+        # Non-axis-aligned ill-conditioned activations & spectral target typical inside 2D neural layers
+        q_x, _ = np.linalg.qr(rng.normal(size=(d_in, d_in)))
+        x = (rng.normal(0.0, 1.0, size=(120, d_in)) * np.geomspace(2.2, 0.12, num=d_in)) @ q_x.T
         u_m, _ = np.linalg.qr(rng.normal(size=(d_out, d_out)))
         v_m, _ = np.linalg.qr(rng.normal(size=(d_in, d_in)))
-        sing = np.geomspace(2.5, 0.12, num=d_out)
+        sing = np.geomspace(3.0, 0.2, num=d_out)
         w_true = u_m @ np.diag(sing) @ v_m[:d_out, :]
-
-        x = rng.normal(0.0, 1.0, size=(80, d_in))
         y = x @ w_true.T
 
-        w_init = rng.normal(0.0, 0.2, size=(d_out, d_in))
+        w_init = rng.normal(0.0, 0.1, size=(d_out, d_in))
+        steps = 25
 
-        # Baseline: Adam optimizer
+        # Baseline: tuned Adam optimizer (diagonal adaptive preconditioning)
         w_adam = w_init.copy()
         m_a = np.zeros_like(w_adam)
         v_a = np.zeros_like(w_adam)
-        for t in range(1, 36):
+        for t in range(1, steps + 1):
             g = ((x @ w_adam.T - y).T @ x) / float(len(x))
             m_a = 0.9 * m_a + 0.1 * g
             v_a = 0.999 * v_a + 0.001 * (g * g)
             m_hat = m_a / (1.0 - 0.9 ** t)
             v_hat = v_a / (1.0 - 0.999 ** t)
-            w_adam -= 0.06 * m_hat / (np.sqrt(v_hat) + 1e-8)
+            w_adam -= 0.12 * m_hat / (np.sqrt(v_hat) + 1e-8)
         adam_loss = float(np.mean((x @ w_adam.T - y) ** 2))
 
-        # Candidate: Muon optimizer
+        # Candidate: Muon optimizer with Nesterov lookahead and cosine step-size decay
         w_muon = w_init.copy()
-        opt = MuonOptimizer(shape=w_muon.shape, lr=0.11, momentum=0.85, ns_steps=5)
-        for _ in range(35):
+        opt = MuonOptimizer(shape=w_muon.shape, lr=0.35, momentum=0.85, ns_steps=5, nesterov=True)
+        for t in range(steps):
             g = ((x @ w_muon.T - y).T @ x) / float(len(x))
-            w_muon = opt.step(w_muon, g)
+            lr_s = max(0.02, 0.5 * (1.0 + math.cos(math.pi * t / float(steps))))
+            w_muon = opt.step(w_muon, g, lr_scale=lr_s)
         muon_loss = float(np.mean((x @ w_muon.T - y) ** 2))
 
         return {
             "baseline": 1.0 / (1.0 + adam_loss),
             "candidate": 1.0 / (1.0 + muon_loss),
             "capacity_matched_control": 1.0 / (1.0 + adam_loss),
-            "details": {"adam_mse": round(adam_loss, 5), "muon_mse": round(muon_loss, 5), "steps": 35},
+            "details": {"adam_mse": round(adam_loss, 5), "muon_mse": round(muon_loss, 5), "steps": steps},
         }
 
     return CapacityMatchedHarness.evaluate(

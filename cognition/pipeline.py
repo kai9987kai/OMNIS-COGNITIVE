@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 from collections import deque
+import math
 from typing import Any, Deque, Dict, List, Optional
+
+import numpy as np
 
 from core.math_utils import shannon_entropy
 from core.schemas import CognitiveStateSnapshot
@@ -50,6 +53,7 @@ class CognitivePipeline:
         enable_memory_ops: bool = True,
         ewc_lambda: float = 0.0,
         neural_weight: float = 0.35,
+        frontier_context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Execute all 10 cognitive stages for one agent step and return telemetry + C_t snapshot."""
 
@@ -131,6 +135,28 @@ class CognitivePipeline:
                 if best_act is not None and 0 <= int(best_act) < learner.num_actions:
                     blended_logits[int(best_act)] += 0.35 * pm.reward_assoc
 
+        frontier_dendritic_out: Optional[float] = None
+        if frontier_context:
+            feats_arr = np.asarray(features[:8], dtype=float)
+            if feats_arr.size < 8:
+                feats_arr = np.pad(feats_arr, (0, 8 - feats_arr.size))
+            hopfield_mem = frontier_context.get("hopfield_mem")
+            if hopfield_mem is not None and getattr(hopfield_mem, "patterns", None):
+                recalled = hopfield_mem.retrieve(feats_arr)
+                for idx in range(min(learner.num_actions, len(recalled))):
+                    blended_logits[idx] += 0.15 * math.tanh(float(recalled[idx]))
+            continuum_mem = frontier_context.get("continuum_mem")
+            if continuum_mem is not None:
+                c_pred = continuum_mem.predict(feats_arr)
+                for idx in range(min(learner.num_actions, len(c_pred))):
+                    blended_logits[idx] += 0.15 * math.tanh(float(c_pred[idx]))
+            dendritic_ctrl = frontier_context.get("dendritic_ctrl")
+            if dendritic_ctrl is not None:
+                ctx_vec = np.array([1.0, 0.0] if int(obs.get("task_id", 0)) == 0 else [0.0, 1.0], dtype=float)
+                dend_val, _, _ = dendritic_ctrl.forward(feats_arr, ctx_vec)
+                frontier_dendritic_out = float(dend_val)
+                blended_logits[0] += 0.08 * math.tanh(frontier_dendritic_out)
+
         action = learner.select_action(
             obs["state_key"],
             neural_logits=blended_logits,
@@ -199,6 +225,21 @@ class CognitivePipeline:
             "variational_free_energy": round(variational_free_energy, 4),
             "epistemic_foraging_drive": round(epistemic_drive, 4),
         }
+        if frontier_context:
+            w_t["frontier_active"] = True
+            feats_arr = np.asarray(features[:8], dtype=float)
+            if feats_arr.size < 8:
+                feats_arr = np.pad(feats_arr, (0, 8 - feats_arr.size))
+            continuum_mem = frontier_context.get("continuum_mem")
+            if continuum_mem is not None and enable_plasticity:
+                target_vec = np.zeros(max(1, int(getattr(continuum_mem, "out_dim", learner.num_actions))), dtype=float)
+                target_vec[action % len(target_vec)] = math.tanh(float(reward) + 0.5 * float(td_error))
+                w_t["frontier_continuum_mse"] = round(float(continuum_mem.update(feats_arr, target_vec)), 5)
+            hopfield_mem = frontier_context.get("hopfield_mem")
+            if hopfield_mem is not None and (reward > 0.35 or abs(td_error) > 0.45):
+                hopfield_mem.store(feats_arr)
+            if frontier_dendritic_out is not None:
+                w_t["frontier_dendritic_out"] = round(frontier_dendritic_out, 5)
 
         # 9. MEMORY CONSOLIDATION & REPLAY
         consolidated_count = 0

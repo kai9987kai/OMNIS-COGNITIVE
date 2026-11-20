@@ -112,6 +112,7 @@ class ArtificialOrganism:
         enable_memory_ops: bool = True,
         ewc_lambda: float = 0.0,
         fitness_weights: Optional[Dict[str, float]] = None,
+        frontier_context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Execute one cognitive-behavioral cycle in DIAMOND and update fitness metrics."""
         if not self.alive:
@@ -134,6 +135,7 @@ class ArtificialOrganism:
             enable_memory_ops=enable_memory_ops,
             ewc_lambda=ewc_lambda,
             neural_weight=self.genome["neural_weight"],
+            frontier_context=frontier_context,
         )
         self.last_cognitive_state = out["snapshot"]
         reward = float(out["reward"])

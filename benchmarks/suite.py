@@ -15,6 +15,7 @@ from core.math_utils import (
 )
 from core.schemas import SCHEMA_VERSION, utc_now_iso
 from diamond.environment import DiamondWorld
+from frontier.memory_systems import ContinuumMemorySystem, ModernHopfieldAssociativeMemory
 from genesis.lifecycle import GenesisEngine
 from morpheus.regenerator import MorpheusRegenerator
 from neurohive.organism import ArtificialOrganism
@@ -26,6 +27,7 @@ ARCHITECTURES = [
     "C_ADAPTIVE_MEMORY",
     "D_FULL_OMNIS",
     "E_DEEP_RL_OMNIS",
+    "F_FRONTIER_OMNIS",
 ]
 
 
@@ -36,11 +38,22 @@ def _evaluate_single_seed(arch: str, seed: int, episodes: int = 8, steps_per_epi
     morph = MorpheusRegenerator(seed=seed)
 
     use_deep_rl = arch == "E_DEEP_RL_OMNIS"
-    org = genesis.create_organism(seed=seed, neuron_model="rate_coded", learning_rate=0.09, use_deep_rl=use_deep_rl)
-    enable_plasticity = arch in ("B_ADAPTIVE", "C_ADAPTIVE_MEMORY", "D_FULL_OMNIS", "E_DEEP_RL_OMNIS")
-    enable_structural = arch in ("B_ADAPTIVE", "C_ADAPTIVE_MEMORY", "D_FULL_OMNIS", "E_DEEP_RL_OMNIS")
-    enable_memory = arch in ("C_ADAPTIVE_MEMORY", "D_FULL_OMNIS", "E_DEEP_RL_OMNIS")
-    enable_developmental = arch in ("D_FULL_OMNIS", "E_DEEP_RL_OMNIS")
+    is_frontier = arch == "F_FRONTIER_OMNIS"
+    neuron_model = "dual_soma" if is_frontier else "rate_coded"
+    org = genesis.create_organism(seed=seed, neuron_model=neuron_model, learning_rate=0.09, use_deep_rl=use_deep_rl)
+    enable_plasticity = arch in ("B_ADAPTIVE", "C_ADAPTIVE_MEMORY", "D_FULL_OMNIS", "E_DEEP_RL_OMNIS", "F_FRONTIER_OMNIS")
+    enable_structural = arch in ("B_ADAPTIVE", "C_ADAPTIVE_MEMORY", "D_FULL_OMNIS", "E_DEEP_RL_OMNIS", "F_FRONTIER_OMNIS")
+    enable_memory = arch in ("C_ADAPTIVE_MEMORY", "D_FULL_OMNIS", "E_DEEP_RL_OMNIS", "F_FRONTIER_OMNIS")
+    enable_developmental = arch in ("D_FULL_OMNIS", "E_DEEP_RL_OMNIS", "F_FRONTIER_OMNIS")
+
+    frontier_ctx: Optional[Dict[str, Any]] = None
+    if is_frontier:
+        org.genome["plasticity_mode"] = "bcm_metaplastic"
+        org.connectome.inject_neurograft(max_grafts=4)
+        frontier_ctx = {
+            "hopfield_mem": ModernHopfieldAssociativeMemory(dim=8, beta=5.0),
+            "continuum_mem": ContinuumMemorySystem(dim=8, out_dim=5, seed=seed),
+        }
 
     if enable_developmental:
         genesis.advance_stage(org, "STAGE_2_DEVELOPMENT")
@@ -74,6 +87,7 @@ def _evaluate_single_seed(arch: str, seed: int, episodes: int = 8, steps_per_epi
                 enable_structural_adaptation=enable_structural,
                 enable_memory_ops=enable_memory,
                 ewc_lambda=0.25 if enable_memory else 0.0,
+                frontier_context=frontier_ctx,
             )
             world.step_world_dynamics()
             ep_rew += float(res["reward"])
@@ -208,6 +222,14 @@ def run_architecture_benchmarks(
         [t["task_performance"] for t in per_arch_raw["D_FULL_OMNIS"]],
         [t["task_performance"] for t in per_arch_raw["E_DEEP_RL_OMNIS"]],
     )
+    comp_f_vs_a = compare_distributions(
+        [t["task_performance"] for t in per_arch_raw["A_FIXED"]],
+        [t["task_performance"] for t in per_arch_raw["F_FRONTIER_OMNIS"]],
+    )
+    comp_f_vs_d = compare_distributions(
+        [t["task_performance"] for t in per_arch_raw["D_FULL_OMNIS"]],
+        [t["task_performance"] for t in per_arch_raw["F_FRONTIER_OMNIS"]],
+    )
 
     report = {
         "schema_version": SCHEMA_VERSION,
@@ -222,6 +244,8 @@ def run_architecture_benchmarks(
             "D_vs_A_robustness": rob_d_vs_a,
             "E_vs_A_task_performance": comp_e_vs_a,
             "E_vs_D_task_performance": comp_e_vs_d,
+            "F_vs_A_task_performance": comp_f_vs_a,
+            "F_vs_D_task_performance": comp_f_vs_d,
         },
     }
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import copy
 import math
 import random
 from typing import Any, Dict, List, Optional, Tuple
@@ -12,7 +13,7 @@ import numpy as np
 
 
 VALID_NEURON_MODELS = ("conventional", "rate_coded", "threshold", "lif", "dual_soma", "liquid_ltc")
-VALID_PLASTICITY_MODES = ("three_factor", "hebbian", "hybrid", "neuromodulated")
+VALID_PLASTICITY_MODES = ("three_factor", "hebbian", "hybrid", "neuromodulated", "bcm_metaplastic")
 
 
 @dataclass
@@ -36,6 +37,8 @@ class Neuron:
     soma2_u: float = 0.0
     glial_ca: float = 0.0
     tau: float = 1.0
+    metaplastic_theta: float = 0.35
+    kuramoto_phase: float = 0.0
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -56,6 +59,8 @@ class Neuron:
             "soma2_u": float(self.soma2_u),
             "glial_ca": float(self.glial_ca),
             "tau": float(self.tau),
+            "metaplastic_theta": float(self.metaplastic_theta),
+            "kuramoto_phase": float(self.kuramoto_phase),
         }
 
     @classmethod
@@ -78,6 +83,8 @@ class Neuron:
             soma2_u=float(data.get("soma2_u", 0.0)),
             glial_ca=float(data.get("glial_ca", 0.0)),
             tau=float(data.get("tau", 1.0)),
+            metaplastic_theta=float(data.get("metaplastic_theta", 0.35)),
+            kuramoto_phase=float(data.get("kuramoto_phase", 0.0)),
         )
 
 
@@ -518,6 +525,14 @@ class SonapseConnectome:
                 mod_gain = (1.0 + 0.5 * ach) * (da if abs(delta_t) > 1e-5 else 0.25)
                 homeostatic_pull = 0.02 * (0.35 - post_act) * pre_act
                 dw = eta * (mod_gain * syn.eligibility + homeostatic_pull) - lam * syn.weight
+            elif mode == "bcm_metaplastic":
+                post_n.metaplastic_theta = max(
+                    0.08,
+                    min(1.2, 0.92 * float(post_n.metaplastic_theta) + 0.08 * (post_act ** 2)),
+                )
+                bcm_term = post_act * (post_act - post_n.metaplastic_theta) * pre_act
+                da_mod = da if abs(delta_t) > 1e-5 else 0.25
+                dw = eta * (0.55 * bcm_term + 0.65 * da_mod * syn.eligibility) - lam * syn.weight
             else:
                 raise ValueError(f"Unsupported plasticity mode: {mode}")
 
@@ -548,7 +563,7 @@ class SonapseConnectome:
                     }
                 )
 
-        if mode in ("three_factor", "hybrid", "neuromodulated"):
+        if mode in ("three_factor", "hybrid", "neuromodulated", "bcm_metaplastic"):
             skip_deltas = [
                 ("in_0->out_1", eta),
                 ("in_0->out_3", -eta),
@@ -652,6 +667,44 @@ class SonapseConnectome:
                 10.0,
                 syn.fisher_importance + (syn.eligibility ** 2) + 0.25 * ((pre_a * post_a) ** 2),
             )
+
+    def compute_live_diagnostics(self, steps: int = 16) -> Dict[str, Any]:
+        """Measure non-destructive FC/EC connectivity, Top-K SAE causal specificity, and metaplastic/phase telemetry."""
+        from frontier.analysis import ConnectivityAnalyzer, TopKSparseDictionary
+
+        probe_steps = max(8, int(steps))
+        clone = copy.deepcopy(self)
+        node_ids, traces = ConnectivityAnalyzer.record_connectome_traces(clone, steps=probe_steps, seed=self.seed)
+        connectivity = ConnectivityAnalyzer.analyze(node_ids, traces)
+
+        feat_dim = max(2, min(8, int(traces.shape[1]))) if traces.ndim == 2 and traces.shape[1] >= 2 else 2
+        if traces.ndim == 2 and traces.shape[1] >= feat_dim:
+            data = traces[:, :feat_dim]
+        else:
+            data = np.zeros((probe_steps, feat_dim), dtype=float)
+        sae = TopKSparseDictionary(input_dim=feat_dim, dict_size=18, k_active=3, seed=self.seed)
+        sae_mse = sae.fit(data, epochs=25, lr=0.08)
+        probe_rng = np.random.default_rng(self.seed)
+        probe_readout = probe_rng.normal(0.0, 0.5, size=(feat_dim,))
+        ablation = sae.causal_feature_ablation(data, probe_readout)
+
+        active_neurons = [n for n in self.neurons.values() if n.active]
+        mean_theta = sum(float(n.metaplastic_theta) for n in active_neurons) / max(1, len(active_neurons))
+        phases = [float(n.kuramoto_phase) for n in active_neurons]
+        phase_spread = float(np.std(phases)) if phases else 0.0
+
+        return {
+            "steps_probed": probe_steps,
+            "connectivity": connectivity,
+            "sparse_dictionary": {
+                "dict_size": 18,
+                "k_active": 3,
+                "recon_mse": round(float(sae_mse), 5),
+                **ablation,
+            },
+            "mean_metaplastic_theta": round(float(mean_theta), 5),
+            "kuramoto_phase_spread": round(phase_spread, 5),
+        }
 
     def prune_weak_connections(self, min_weight: float = 0.02, min_edges_to_keep: int = 8) -> int:
         """Remove connections whose |weight| < min_weight while maintaining minimum connectivity."""

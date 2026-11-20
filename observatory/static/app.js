@@ -8,6 +8,8 @@
     manualRpeTouched: false,
     signalsPaused: false,
     offscreenPaused: false,
+    showPhaseOverlay: true,
+    telemetryEventSource: null,
     connectomeGraph: null,
     selectedNodeId: null,
     camRotY: 0.35,
@@ -25,23 +27,42 @@
   };
 
   async function api(path, opts = {}) {
+    const { background, ...fetchOpts } = opts;
     const storedKey = window.localStorage?.getItem("omnis_api_key");
     const urlKey = new URLSearchParams(window.location.search).get("api_key");
     const apiKey = urlKey || storedKey;
     const headers = {
       "Content-Type": "application/json",
       ...(apiKey ? { "X-API-Key": apiKey } : {}),
-      ...(opts.headers || {}),
+      ...(fetchOpts.headers || {}),
     };
     const res = await fetch(path, {
-      ...opts,
+      ...fetchOpts,
       headers,
+      ...(background ? { priority: "low" } : {}),
     });
     if (!res.ok) {
       const txt = await res.text();
       throw new Error(`${res.status}: ${txt}`);
     }
     return res.json();
+  }
+
+  function kuramotoPhaseHue(phaseRad) {
+    const twoPi = Math.PI * 2;
+    const norm = (((Number(phaseRad || 0) % twoPi) + twoPi) % twoPi) / twoPi;
+    return Math.round(norm * 360);
+  }
+
+  function formatFrontierHookTelemetry(hookStatus) {
+    if (!hookStatus || !hookStatus.active) {
+      return "Neutral hook inactive (0 core overhead). Enable hook & step simulation to stream live observer telemetry.";
+    }
+    const latest = hookStatus.latest_telemetry;
+    if (!latest) {
+      return `Hook ACTIVE (${(hookStatus.spec && Object.keys(hookStatus.spec).filter((k) => k.startsWith("enable_") && hookStatus.spec[k]).length) || 0} flags enabled) · Waiting for next core tick...`;
+    }
+    return `Tick ${latest.tick} Observers · ${JSON.stringify(latest.observers)}`;
   }
 
   function renderKV(containerSelector, entries) {
@@ -147,7 +168,7 @@
       const intervalMs = Number($("#speed-select").value || 700);
       state.autoRunTimer = setInterval(async () => {
         try {
-          await api("/api/simulation/step", { method: "POST", body: JSON.stringify({ steps: 1 }) });
+          await api("/api/simulation/step", { method: "POST", body: JSON.stringify({ steps: 1 }), background: true });
           await refreshAll();
         } catch (_) {}
       }, intervalMs);
@@ -182,7 +203,7 @@
 
   // View A: Command Centre
   async function refreshCommandCentre() {
-    const [cc, ev] = await Promise.all([api("/api/command-centre"), api("/api/events?limit=25")]);
+    const [cc, ev] = await Promise.all([api("/api/command-centre"), api("/api/events?limit=25", { background: true })]);
     $("#header-tick").textContent = cc.tick;
     $("#header-gen").textContent = cc.generation;
     $("#sim-status-text").textContent = cc.status;
@@ -350,14 +371,21 @@
 
     const stageEl = $("#connectome-canvas-stage") || host;
     const supportsCV = "contentVisibility" in document.documentElement.style;
-    stageEl.addEventListener("contentvisibilityautostatechange", (ev) => {
-      state.offscreenPaused = Boolean(ev.skipped);
-    });
+    const handleVisibility = (skipped) => {
+      state.offscreenPaused = Boolean(skipped);
+      const sseEl = $("#hud-sse-status");
+      if (state.offscreenPaused && state.telemetryEventSource) {
+        state.telemetryEventSource.close();
+        state.telemetryEventSource = null;
+        if (sseEl) sseEl.textContent = "PAUSED";
+      } else if (!state.offscreenPaused && state.livePlasticityTimer && !state.telemetryEventSource) {
+        startTelemetryStream();
+      }
+    };
+    stageEl.addEventListener("contentvisibilityautostatechange", (ev) => handleVisibility(ev.skipped));
     if (!supportsCV && typeof IntersectionObserver !== "undefined") {
       const io = new IntersectionObserver((entries) => {
-        entries.forEach((entry) => {
-          state.offscreenPaused = !entry.isIntersecting;
-        });
+        entries.forEach((entry) => handleVisibility(!entry.isIntersecting));
       });
       io.observe(stageEl);
     }
@@ -409,6 +437,7 @@
       `<strong>${escapeHtml(node.neuron_id)}</strong> (${escapeHtml(node.role)} · ${escapeHtml(node.neuron_model)})<br>` +
       `Active: ${node.active} · Excitatory: ${node.excitatory}<br>` +
       `Membrane u_i: ${node.u.toFixed(4)} · Activation a_i: ${node.a.toFixed(4)}<br>` +
+      `BCM θ_m: ${Number(node.metaplastic_theta ?? 0.35).toFixed(4)} · Kuramoto φ: ${Number(node.kuramoto_phase ?? 0).toFixed(3)} rad<br>` +
       `Connected synapses: ${edges.length}<br>` +
       edges
         .slice(0, 6)
@@ -462,6 +491,20 @@
         const halo = new THREE.Mesh(haloGeo, haloMat);
         halo.position.copy(mesh.position);
         group.add(halo);
+      }
+
+      if (state.showPhaseOverlay && n.active && Math.abs(Number(n.kuramoto_phase || 0)) > 1e-4) {
+        const hue = kuramotoPhaseHue(n.kuramoto_phase);
+        const phaseGeo = new THREE.RingGeometry(0.46, 0.56, 20);
+        const phaseMat = new THREE.MeshBasicMaterial({
+          color: new THREE.Color(`hsl(${hue}, 90%, 62%)`),
+          side: THREE.DoubleSide,
+          transparent: true,
+          opacity: 0.85,
+        });
+        const phaseRing = new THREE.Mesh(phaseGeo, phaseMat);
+        phaseRing.position.copy(mesh.position);
+        group.add(phaseRing);
       }
     });
 
@@ -657,6 +700,13 @@
         ctx.beginPath();
         ctx.arc(sx, sy, radius + Math.min(4.5, Math.abs(raw.a) * 3.2), 0, Math.PI * 2);
         ctx.fill();
+        if (state.showPhaseOverlay && raw.active && Math.abs(Number(raw.kuramoto_phase || 0)) > 1e-4) {
+          ctx.strokeStyle = `hsl(${kuramotoPhaseHue(raw.kuramoto_phase)}, 90%, 62%)`;
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.arc(sx, sy, radius + Math.min(4.5, Math.abs(raw.a) * 3.2) + 4, 0, Math.PI * 2);
+          ctx.stroke();
+        }
         if (state.selectedNodeId === raw.neuron_id) {
           ctx.strokeStyle = "#ffffff";
           ctx.lineWidth = 2;
@@ -689,6 +739,47 @@
     $("#conn-plasticity-mode").addEventListener("change", () => stimulateNeuron(null));
   }
 
+  function startTelemetryStream() {
+    if (typeof EventSource === "undefined" || state.telemetryEventSource) return;
+    const sseEl = $("#hud-sse-status");
+    const qs = state.selectedOrganismId
+      ? `?interval_ms=650&organism_id=${encodeURIComponent(state.selectedOrganismId)}`
+      : "?interval_ms=650";
+    try {
+      const es = new EventSource(`/api/stream/telemetry${qs}`);
+      es.addEventListener("telemetry", (ev) => {
+        try {
+          const d = JSON.parse(ev.data);
+          if (d.tick !== undefined && $("#header-tick")) $("#header-tick").textContent = String(d.tick);
+          if (d.recent_signals_count !== undefined && $("#hud-signals-count")) {
+            $("#hud-signals-count").textContent = String(d.recent_signals_count);
+          }
+          if (d.last_weight_delta_norm !== undefined && $("#hud-dw-norm")) {
+            $("#hud-dw-norm").textContent = Number(d.last_weight_delta_norm).toFixed(5);
+          }
+          if ($("#frontier-hook-telemetry") && d.frontier_hook) {
+            $("#frontier-hook-telemetry").textContent = formatFrontierHookTelemetry(d.frontier_hook);
+          }
+          if (sseEl) sseEl.textContent = "STREAMING";
+        } catch (_) {}
+      });
+      es.onerror = () => {
+        if (sseEl) sseEl.textContent = "RECONNECT";
+      };
+      state.telemetryEventSource = es;
+      if (sseEl) sseEl.textContent = "STREAMING";
+    } catch (_) {}
+  }
+
+  function stopTelemetryStream() {
+    if (state.telemetryEventSource) {
+      state.telemetryEventSource.close();
+      state.telemetryEventSource = null;
+    }
+    const sseEl = $("#hud-sse-status");
+    if (sseEl) sseEl.textContent = "IDLE";
+  }
+
   if ($("#btn-toggle-signals")) {
     $("#btn-toggle-signals").addEventListener("click", (ev) => {
       state.signalsPaused = !state.signalsPaused;
@@ -697,12 +788,41 @@
     });
   }
 
+  if ($("#btn-toggle-phase-overlay")) {
+    $("#btn-toggle-phase-overlay").addEventListener("click", (ev) => {
+      state.showPhaseOverlay = !state.showPhaseOverlay;
+      ev.currentTarget.textContent = state.showPhaseOverlay ? "Phase Overlay: ON" : "Phase Overlay: OFF";
+      if (state.connectomeGraph) rebuildThreeGraph(state.connectomeGraph);
+      announce(state.showPhaseOverlay ? "Kuramoto phase overlay enabled on 3D neurons" : "Kuramoto phase overlay hidden");
+    });
+  }
+
+  $("#btn-conn-diagnostics")?.addEventListener("click", async () => {
+    const qs = state.selectedOrganismId ? `?organism_id=${encodeURIComponent(state.selectedOrganismId)}` : "";
+    const res = await api(`/api/connectome/diagnostics${qs}`, { method: "POST" });
+    const c = res.connectivity || {};
+    const sae = res.sparse_dictionary || {};
+    const box = $("#connectome-diagnostics-box");
+    if (box) {
+      box.innerHTML =
+        `<strong>Connectivity (${res.steps_probed} steps):</strong> FC=${Number(c.mean_fc || 0).toFixed(4)} · ` +
+        `EC=${Number(c.mean_ec || 0).toFixed(4)} · Asym=${Number(c.asymmetry_index || 0).toFixed(4)}<br>` +
+        `<strong>Top-K SAE (K=${sae.k_active || 3}):</strong> MSE=${Number(sae.recon_mse || 0).toFixed(5)} · ` +
+        `Causal Shift=${Number(sae.causal_ablation_shift || 0).toFixed(4)} vs Ctrl=${Number(sae.control_ablation_shift || 0).toFixed(4)} ` +
+        `(${Number(sae.causal_specificity_ratio || 1).toFixed(2)}x)<br>` +
+        `<strong>BCM Mean θ:</strong> ${Number(res.mean_metaplastic_theta || 0.35).toFixed(4)} · ` +
+        `<strong>Kuramoto R(t):</strong> ${Number(res.kuramoto_order_parameter_R || 0).toFixed(4)}`;
+    }
+    announce(`Connectome FC/EC & Top-K SAE audit complete (specificity=${sae.causal_specificity_ratio || 1}x).`);
+  });
+
   if ($("#btn-live-plasticity")) {
     $("#btn-live-plasticity").addEventListener("click", (ev) => {
       const btn = ev.currentTarget;
       if (state.livePlasticityTimer) {
         clearInterval(state.livePlasticityTimer);
         state.livePlasticityTimer = null;
+        stopTelemetryStream();
         btn.textContent = "Live Stream: OFF";
         btn.classList.remove("btn-stream-active");
         announce("Live plasticity stream stopped");
@@ -710,12 +830,13 @@
         btn.textContent = "Live Stream: ON";
         btn.classList.add("btn-stream-active");
         runLivePlasticityStep();
+        startTelemetryStream();
         state.livePlasticityTimer = setInterval(() => {
-          if (state.currentView === "connectome") {
+          if (state.currentView === "connectome" && !state.offscreenPaused) {
             runLivePlasticityStep();
           }
         }, 450);
-        announce("Live plasticity stream started");
+        announce("Live plasticity + SSE telemetry stream started");
       }
     });
   }
@@ -1803,6 +1924,13 @@
     if ($("#chk-hook-kuramoto")) $("#chk-hook-kuramoto").checked = Boolean(spec.enable_kuramoto);
     if ($("#chk-hook-fastweights")) $("#chk-hook-fastweights").checked = Boolean(spec.enable_fast_weights);
     if ($("#chk-hook-assoc")) $("#chk-hook-assoc").checked = Boolean(spec.enable_associative_memory);
+    if ($("#chk-hook-ctm")) $("#chk-hook-ctm").checked = Boolean(spec.enable_ctm_synchrony);
+    if ($("#chk-hook-continuum")) $("#chk-hook-continuum").checked = Boolean(spec.enable_continuum_memory);
+    if ($("#chk-hook-btsp")) $("#chk-hook-btsp").checked = Boolean(spec.enable_btsp);
+    if ($("#chk-hook-dendritic")) $("#chk-hook-dendritic").checked = Boolean(spec.enable_dendritic);
+    if ($("#frontier-hook-telemetry")) {
+      $("#frontier-hook-telemetry").textContent = formatFrontierHookTelemetry(reg.hook_status);
+    }
   }
 
   $("#btn-frontier-run")?.addEventListener("click", async () => {
@@ -1818,10 +1946,10 @@
   });
 
   $("#btn-frontier-suite")?.addEventListener("click", async () => {
-    announce("Running multi-module capacity-matched frontier sweep...");
+    announce("Running all-19 capacity-matched frontier sweep...");
     const res = await api("/api/frontier/suite", {
       method: "POST",
-      body: JSON.stringify({ seeds: [42, 101, 202] }),
+      body: JSON.stringify({ seeds: [42, 101, 202, 303, 404] }),
     });
     renderFrontierResultsTable(res.results || []);
     $("#frontier-receipt-pre").textContent = JSON.stringify(
@@ -1861,10 +1989,23 @@
         enable_kuramoto: Boolean($("#chk-hook-kuramoto")?.checked),
         enable_fast_weights: Boolean($("#chk-hook-fastweights")?.checked),
         enable_associative_memory: Boolean($("#chk-hook-assoc")?.checked),
+        enable_ctm_synchrony: Boolean($("#chk-hook-ctm")?.checked),
+        enable_continuum_memory: Boolean($("#chk-hook-continuum")?.checked),
+        enable_btsp: Boolean($("#chk-hook-btsp")?.checked),
+        enable_dendritic: Boolean($("#chk-hook-dendritic")?.checked),
       }),
     });
+    if ($("#frontier-hook-telemetry")) {
+      $("#frontier-hook-telemetry").textContent = formatFrontierHookTelemetry(res.hook_status);
+    }
     $("#frontier-receipt-pre").textContent = JSON.stringify(res, null, 2);
     announce(`Updated neutral frontier engine hook (active=${res.hook_status?.active}).`);
+  });
+
+  document.querySelectorAll(".cv-auto-panel").forEach((panel) => {
+    panel.addEventListener("contentvisibilityautostatechange", (ev) => {
+      panel.dataset.cvSkipped = String(Boolean(ev.skipped));
+    });
   });
 
   async function refreshCurrentView() {

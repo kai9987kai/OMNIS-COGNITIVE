@@ -153,7 +153,7 @@ class GovernanceManager:
                     raise ValueError(f"{k} must be in [0.01, 1.0]")
                 cleaned[k] = val
             elif k == "plasticity_mode":
-                if v not in ("three_factor", "hebbian", "hybrid", "neuromodulated"):
+                if v not in ("three_factor", "hebbian", "hybrid", "neuromodulated", "bcm_metaplastic"):
                     raise ValueError(f"Invalid plasticity_mode: {v}")
                 cleaned[k] = v
             elif k == "default_neuron_model":
