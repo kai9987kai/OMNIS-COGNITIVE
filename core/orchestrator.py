@@ -14,6 +14,9 @@ from core.governance import GovernanceManager, SelfImprovementEngine
 from core.persistence import OmnisDatabase
 from core.schemas import SCHEMA_VERSION, SystemConfig, utc_now_iso
 from diamond.environment import DiamondWorld
+from frontier import FrontierExtensionHook, build_frontier_registry
+from frontier.memory_systems import FastWeightsController, ModernHopfieldAssociativeMemory
+from frontier.temporal import KuramotoOscillatorBank
 from genesis.lifecycle import GenesisEngine
 from ghost_engine.laboratory import GhostEngine
 from hardware.abstraction import HardwareManager
@@ -77,6 +80,12 @@ class OmnisCore:
         )
         self.morpheus = MorpheusRegenerator(event_bus=self.event_bus, seed=self.config.seed)
         self.ghost_engine = GhostEngine(db=self.db, event_bus=self.event_bus)
+        self.frontier_hook = FrontierExtensionHook()
+        self.frontier_registry = build_frontier_registry()
+        self.kuramoto_bank = KuramotoOscillatorBank(seed=self.config.seed)
+        self.fast_weights_ctrl = FastWeightsController(dim=8)
+        self.hopfield_mem = ModernHopfieldAssociativeMemory(dim=8)
+        self._register_frontier_observers()
 
         self._initialize_population()
         self.governance.record_audit(
@@ -84,6 +93,37 @@ class OmnisCore:
             "system_initialized",
             {"schema_version": SCHEMA_VERSION, "initial_population": len(self.ecosystem.organisms)},
         )
+
+    def _register_frontier_observers(self) -> None:
+        def _obs_kuramoto(ctx: Dict[str, Any]) -> Dict[str, Any]:
+            lead = ctx.get("lead")
+            if lead is not None and self.kuramoto_bank.n != lead.connectome.active_neuron_count():
+                self.kuramoto_bank.bind_connectome(lead.connectome)
+            return self.kuramoto_bank.step(steps=4)
+
+        def _obs_fast_weights(ctx: Dict[str, Any]) -> Dict[str, Any]:
+            lead = ctx.get("lead")
+            if lead is None or lead.last_cognitive_state is None:
+                return {"bound": False}
+            feats = list(lead.last_cognitive_state.P_t.get("features", [0.0] * 8))[:8]
+            while len(feats) < 8:
+                feats.append(0.0)
+            self.fast_weights_ctrl.bind(feats, feats)
+            recalled = self.fast_weights_ctrl.query(feats)
+            return {"bound": True, "recall_norm": round(float(sum(x * x for x in recalled) ** 0.5), 4)}
+
+        def _obs_assoc(ctx: Dict[str, Any]) -> Dict[str, Any]:
+            lead = ctx.get("lead")
+            if lead is None or lead.last_cognitive_state is None:
+                return {"stored_patterns": len(self.hopfield_mem.patterns)}
+            feats = list(lead.last_cognitive_state.P_t.get("features", [0.0] * 8))[:8]
+            self.hopfield_mem.store(feats)
+            recalled = self.hopfield_mem.retrieve(feats)
+            return {"stored_patterns": len(self.hopfield_mem.patterns), "energy_norm": round(float(sum(x * x for x in recalled) ** 0.5), 4)}
+
+        self.frontier_hook.register_observer("kuramoto", _obs_kuramoto)
+        self.frontier_hook.register_observer("fast_weights", _obs_fast_weights)
+        self.frontier_hook.register_observer("associative_memory", _obs_assoc)
 
     def _initialize_population(self) -> None:
         models = ["rate_coded", "conventional", "lif", "threshold"]
@@ -127,6 +167,8 @@ class OmnisCore:
                     "total_synapses": sum(len(o.connectome.active_synapses()) for o in self.ecosystem.organisms.values()),
                 }
                 self.telemetry_history.append(snap)
+                if self.frontier_hook.spec.any_active():
+                    self.frontier_hook.on_step({"tick": self.tick, "lead": self.get_organism()})
 
             self.last_step_latency_ms = ((time.perf_counter() - t0) * 1000.0) / max(1, int(steps))
             self.event_bus.emit(

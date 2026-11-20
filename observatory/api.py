@@ -100,6 +100,30 @@ class TetherAuditRequest(BaseModel):
     features: Optional[List[float]] = Field(default=None)
 
 
+class FrontierRunRequest(BaseModel):
+    module_id: str = Field(default="ctm_synchrony")
+    seeds: Optional[List[int]] = Field(default=None)
+
+
+class FrontierSuiteRequest(BaseModel):
+    module_ids: Optional[List[str]] = Field(default=None)
+    seeds: Optional[List[int]] = Field(default=None)
+
+
+class FrontierHookConfigRequest(BaseModel):
+    enabled: Optional[bool] = None
+    enable_kuramoto: Optional[bool] = None
+    enable_fast_weights: Optional[bool] = None
+    enable_associative_memory: Optional[bool] = None
+    enable_ctm_synchrony: Optional[bool] = None
+
+
+class KuramotoStepRequest(BaseModel):
+    organism_id: Optional[str] = None
+    steps: int = Field(default=18, ge=1, le=200)
+    coupling_k: float = Field(default=2.6, ge=0.0, le=10.0)
+
+
 class DamageRequest(BaseModel):
     organism_id: Optional[str] = None
     neuron_lesion_ratio: float = Field(default=0.30, ge=0.05, le=0.80)
@@ -598,6 +622,86 @@ def create_observatory_app(core: Optional[OmnisCore] = None) -> FastAPI:
     def get_events(limit: int = Query(default=50, ge=1, le=500)) -> Dict[str, Any]:
         events = [e.model_dump() for e in omnis.event_bus.get_history(limit=limit)]
         return {"counts": omnis.event_bus.get_counts(), "events": events}
+
+    # --- I. Frontier Research Pack (2025-2026 Experimental Modules & NIR/Kuramoto) ---
+    @api_router.get("/frontier/registry")
+    def get_frontier_registry() -> Dict[str, Any]:
+        return {
+            "count": len(omnis.frontier_registry),
+            "modules": [entry.to_metadata() for entry in omnis.frontier_registry.values()],
+            "hook_status": omnis.frontier_hook.get_status(),
+        }
+
+    @api_router.post("/frontier/run")
+    def run_frontier_module(req: FrontierRunRequest) -> Dict[str, Any]:
+        entry = omnis.frontier_registry.get(req.module_id)
+        if entry is None:
+            raise HTTPException(status_code=404, detail=f"Unknown frontier module '{req.module_id}'")
+        seeds = req.seeds or [42, 101, 202, 303, 404]
+        return entry.runner(seeds)
+
+    @api_router.post("/frontier/suite")
+    def run_frontier_suite(req: FrontierSuiteRequest) -> Dict[str, Any]:
+        target_ids = req.module_ids or [
+            "ctm_synchrony",
+            "kuramoto_binding",
+            "continuum_memory",
+            "btsp_binary_memory",
+            "associative_memory",
+            "fast_weights",
+            "tiny_recursive_model",
+            "dendritic_layer",
+            "muon_optimizer",
+            "rigl_sparse_training",
+            "topk_sparse_dictionary",
+            "anytime_valid_statistics",
+            "verifier_gated_qd_search",
+            "hodgkin_huxley_cable",
+            "nir_interchange_export",
+        ]
+        seeds = req.seeds or [42, 101, 202]
+        results: List[Dict[str, Any]] = []
+        for mid in target_ids:
+            entry = omnis.frontier_registry.get(mid)
+            if entry is not None:
+                results.append(entry.runner(seeds))
+        improved = sum(1 for r in results if r["verdict"] == "improved")
+        return {
+            "modules_executed": len(results),
+            "improved_count": improved,
+            "results": results,
+        }
+
+    @api_router.post("/frontier/nir-export")
+    def export_live_connectome_nir(organism_id: Optional[str] = Query(default=None)) -> Dict[str, Any]:
+        from frontier.biophysics import export_connectome_to_nir, validate_nir_graph
+
+        org = omnis.get_organism(organism_id)
+        if org is None:
+            raise HTTPException(status_code=404, detail="Organism not found")
+        nir_graph = export_connectome_to_nir(org.connectome)
+        validation = validate_nir_graph(nir_graph)
+        return {
+            "organism_id": org.organism_id,
+            "validation": validation,
+            "nir_graph": nir_graph,
+        }
+
+    @api_router.post("/frontier/kuramoto-step")
+    def step_live_kuramoto(req: KuramotoStepRequest) -> Dict[str, Any]:
+        org = omnis.get_organism(req.organism_id)
+        if org is None:
+            raise HTTPException(status_code=404, detail="Organism not found")
+        omnis.kuramoto_bank.coupling_k = float(req.coupling_k)
+        omnis.kuramoto_bank.bind_connectome(org.connectome)
+        res = omnis.kuramoto_bank.step(steps=req.steps)
+        return {"organism_id": org.organism_id, **res}
+
+    @api_router.post("/frontier/hook-config")
+    def configure_frontier_hook(req: FrontierHookConfigRequest) -> Dict[str, Any]:
+        updates = {k: v for k, v in req.model_dump().items() if v is not None}
+        spec = omnis.frontier_hook.configure(updates)
+        return {"spec": spec, "hook_status": omnis.frontier_hook.get_status()}
 
     app.include_router(api_router)
     return app

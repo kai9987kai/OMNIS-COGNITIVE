@@ -3,7 +3,15 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="color-scheme" content="dark">
+  <meta name="color-scheme" content="light dark">
+  <script>
+    try {
+      const saved = localStorage.getItem("color-scheme");
+      if (saved === "light" || saved === "dark") {
+        document.querySelector('meta[name="color-scheme"]').content = saved;
+      }
+    } catch (_) {}
+  </script>
   <title>OMNIS 1.0 | Scientific Cognitive Observatory</title>
   <link rel="stylesheet" href="/static/styles.css">
 </head>
@@ -35,6 +43,10 @@
         <option value="300">3.0x</option>
       </select>
       <button type="button" id="btn-persist" class="btn btn-ghost">Save Snapshot</button>
+      <button type="button" id="btn-theme-toggle" class="btn btn-ghost theme-toggle-btn">
+        <span class="theme-opt-light">Light Theme</span>
+        <span class="theme-opt-dark">Dark Theme</span>
+      </button>
     </div>
   </header>
 
@@ -47,6 +59,7 @@
     <button type="button" class="nav-btn" data-view="research">F · Research Lab</button>
     <button type="button" class="nav-btn" data-view="hardware">G · Hardware &amp; Aether</button>
     <button type="button" class="nav-btn" data-view="timeline">H · Timeline &amp; Morpheus</button>
+    <button type="button" class="nav-btn" data-view="frontier">I · Frontier Lab</button>
   </nav>
 
   <div id="live-announcer" class="status-banner" aria-live="polite" aria-atomic="true">
@@ -467,6 +480,79 @@
           <div id="molt-assay-box" class="mono-box">Click 'Run MOLT Trace-Placement Assay' to compare peripheral graft, deep core, and hybrid trace retention across tissue loss, regrowth, and world shift.</div>
         </article>
       </div>
+    </section>
+
+    <!-- I. FRONTIER RESEARCH PACK LAB -->
+    <section id="view-frontier" class="view-panel" hidden aria-labelledby="heading-frontier">
+      <div class="panel-header">
+        <h2 id="heading-frontier">FRONTIER LAB — 2025–2026 Experimental Architecture &amp; Capacity-Matched Harness</h2>
+        <div class="panel-actions">
+          <label for="frontier-module-select" class="inline-label">Module</label>
+          <select id="frontier-module-select" class="sci-select" aria-label="Frontier research module selector"></select>
+          <button type="button" id="btn-frontier-run" class="btn btn-cyan">Run Capacity-Matched Experiment</button>
+          <button type="button" id="btn-frontier-suite" class="btn btn-violet">Run Frontier Sweep</button>
+          <button type="button" id="btn-frontier-kuramoto" class="btn btn-amber">Live Kuramoto Sync</button>
+          <button type="button" id="btn-frontier-nir" class="btn btn-ghost">Export Live NIR Graph</button>
+        </div>
+      </div>
+
+      <div class="split-grid">
+        <article class="glass-card cv-auto-panel">
+          <div class="card-header-row">
+            <h3>Kuramoto Phase-Coherence Ring &amp; Neutral Engine Hook (Default OFF)</h3>
+            <span id="frontier-kuramoto-meta" class="mono-inline">R(t) = —</span>
+          </div>
+          <canvas id="frontier-phase-canvas" class="oscilloscope-canvas" width="520" height="220" aria-label="Kuramoto coupled oscillator phase ring showing neuron synchronization"></canvas>
+          <div class="panel-actions hook-controls">
+            <label class="checkbox-pill" for="chk-hook-enabled">
+              <input type="checkbox" id="chk-hook-enabled">
+              <span>Enable Hook</span>
+            </label>
+            <label class="checkbox-pill" for="chk-hook-kuramoto">
+              <input type="checkbox" id="chk-hook-kuramoto">
+              <span>Kuramoto</span>
+            </label>
+            <label class="checkbox-pill" for="chk-hook-fastweights">
+              <input type="checkbox" id="chk-hook-fastweights">
+              <span>Fast Weights</span>
+            </label>
+            <label class="checkbox-pill" for="chk-hook-assoc">
+              <input type="checkbox" id="chk-hook-assoc">
+              <span>Hopfield Assoc</span>
+            </label>
+            <button type="button" id="btn-frontier-hook-apply" class="btn btn-ghost">Apply Hook Config</button>
+          </div>
+        </article>
+
+        <article class="glass-card cv-auto-panel">
+          <h3>Sealed SHA-256 Receipt &amp; NIR Neuromorphic Graph Inspector</h3>
+          <pre id="frontier-receipt-pre" class="mono-pre">Select any of the 19 frontier modules above and run a capacity-matched experiment or export a live NIR neuromorphic graph.</pre>
+        </article>
+      </div>
+
+      <article class="glass-card cv-auto-panel">
+        <h3>Capacity-Matched Verdicts, 95% CIs &amp; Anytime-Valid E-Values</h3>
+        <div tabindex="0" role="region" aria-labelledby="frontier-caption" class="table-wrapper">
+          <table>
+            <caption id="frontier-caption">Baseline vs Candidate vs Capacity-Matched Control experiment results with 95% confidence intervals and sequential e-values</caption>
+            <thead>
+              <tr>
+                <th scope="col">Module</th>
+                <th scope="col">Metric</th>
+                <th scope="col">Baseline</th>
+                <th scope="col">Candidate</th>
+                <th scope="col">Cap. Control</th>
+                <th scope="col">95% CI (Δ)</th>
+                <th scope="col">E-Value</th>
+                <th scope="col">Verdict</th>
+              </tr>
+            </thead>
+            <tbody id="frontier-results-tbody">
+              <tr><td colspan="8">Click "Run Capacity-Matched Experiment" or "Run Frontier Sweep" to populate sealed verdicts.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </article>
     </section>
   </main>
 

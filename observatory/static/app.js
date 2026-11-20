@@ -63,7 +63,48 @@
       .replaceAll('"', "&quot;");
   }
 
-  // Navigation across A-H Observatory panels
+  // Two-state color-scheme toggle synchronized with <meta name="color-scheme"> and storage events
+  const colorSchemeMeta = document.querySelector('meta[name="color-scheme"]');
+  const sysDarkQuery = window.matchMedia ? window.matchMedia("(prefers-color-scheme: dark)") : null;
+  function getStoredScheme() {
+    try {
+      const v = localStorage.getItem("color-scheme");
+      return v === "light" || v === "dark" ? v : null;
+    } catch (_) {
+      return null;
+    }
+  }
+  function getRenderedScheme() {
+    const stored = getStoredScheme();
+    if (stored) return stored;
+    return sysDarkQuery && sysDarkQuery.matches ? "dark" : "light";
+  }
+  function applySchemeMeta(scheme) {
+    if (colorSchemeMeta) {
+      colorSchemeMeta.content = scheme || "light dark";
+    }
+  }
+  $("#btn-theme-toggle")?.addEventListener("click", () => {
+    const current = getRenderedScheme();
+    const target = current === "dark" ? "light" : "dark";
+    const sysPref = sysDarkQuery && sysDarkQuery.matches ? "dark" : "light";
+    if (target === sysPref) {
+      try { localStorage.removeItem("color-scheme"); } catch (_) {}
+      applySchemeMeta("light dark");
+      announce(`Theme reset to system preference (${sysPref}).`);
+    } else {
+      try { localStorage.setItem("color-scheme", target); } catch (_) {}
+      applySchemeMeta(target);
+      announce(`Switched observatory theme to ${target} mode.`);
+    }
+  });
+  window.addEventListener("storage", (ev) => {
+    if (ev.key === "color-scheme") {
+      applySchemeMeta(ev.newValue === "light" || ev.newValue === "dark" ? ev.newValue : "light dark");
+    }
+  });
+
+  // Navigation across A-I Observatory panels
   document.querySelectorAll(".nav-btn").forEach((btn) => {
     btn.addEventListener("click", () => {
       const view = btn.dataset.view;
@@ -77,6 +118,7 @@
         panel.hidden = !show;
         panel.classList.toggle("active", show);
       });
+      document.title = `${btn.textContent.trim()} | OMNIS 1.0 Cognitive Observatory`;
       refreshCurrentView();
     });
   });
@@ -1683,6 +1725,148 @@
       .join("");
   }
 
+  // View I: Frontier Research Pack Lab
+  function renderKuramotoPhaseRing(data) {
+    const canvas = $("#frontier-phase-canvas");
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    const w = canvas.width;
+    const h = canvas.height;
+    ctx.clearRect(0, 0, w, h);
+
+    const cx = w / 2;
+    const cy = h / 2;
+    const r = Math.min(w, h) * 0.38;
+
+    ctx.strokeStyle = "rgba(110, 168, 254, 0.25)";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.stroke();
+
+    const phases = data.phases || [];
+    phases.forEach((theta, idx) => {
+      const px = cx + Math.cos(theta) * r;
+      const py = cy + Math.sin(theta) * r;
+      ctx.fillStyle = idx % 2 === 0 ? "#00e5ff" : "#26e3a8";
+      ctx.beginPath();
+      ctx.arc(px, py, 5, 0, Math.PI * 2);
+      ctx.fill();
+    });
+
+    const orderR = Number(data.order_parameter_R || 0);
+    const meanPsi = Number(data.mean_phase_rad || 0);
+    ctx.strokeStyle = "#ffb020";
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(cx + Math.cos(meanPsi) * r * orderR, cy + Math.sin(meanPsi) * r * orderR);
+    ctx.stroke();
+
+    const meta = $("#frontier-kuramoto-meta");
+    if (meta) {
+      meta.textContent = `R(t) = ${orderR.toFixed(4)} · PLI = ${Number(data.phase_locking_index || 0).toFixed(4)} · N = ${phases.length}`;
+    }
+  }
+
+  function renderFrontierResultsTable(resultsList) {
+    const tbody = $("#frontier-results-tbody");
+    if (!tbody) return;
+    tbody.innerHTML = (resultsList || [])
+      .map((r) => {
+        const st = r.vs_baseline || {};
+        const badgeCls = r.verdict === "improved" ? "ltp-badge" : r.verdict === "regressed" ? "ltd-badge" : "struct-badge";
+        return `<tr>
+          <th scope="row">${escapeHtml(r.module_id)}</th>
+          <td>${escapeHtml(r.metric_name)}</td>
+          <td>${Number(r.baseline_mean).toFixed(4)}</td>
+          <td><strong>${Number(r.candidate_mean).toFixed(4)}</strong></td>
+          <td>${Number(r.capacity_matched_control_mean).toFixed(4)}</td>
+          <td>[${Number(st.ci_95_low || 0).toFixed(4)}, ${Number(st.ci_95_high || 0).toFixed(4)}]</td>
+          <td>${Number(st.e_value || 1).toFixed(2)}</td>
+          <td><span class="${badgeCls}">${escapeHtml(String(r.verdict || "").toUpperCase())}</span></td>
+        </tr>`;
+      })
+      .join("");
+  }
+
+  async function refreshFrontier() {
+    const reg = await api("/api/frontier/registry");
+    const sel = $("#frontier-module-select");
+    if (sel && !sel.options.length) {
+      sel.innerHTML = (reg.modules || [])
+        .map((m) => `<option value="${escapeHtml(m.module_id)}">[${escapeHtml(m.category)}] ${escapeHtml(m.title)}</option>`)
+        .join("");
+    }
+    const spec = reg.hook_status?.spec || {};
+    if ($("#chk-hook-enabled")) $("#chk-hook-enabled").checked = Boolean(spec.enabled);
+    if ($("#chk-hook-kuramoto")) $("#chk-hook-kuramoto").checked = Boolean(spec.enable_kuramoto);
+    if ($("#chk-hook-fastweights")) $("#chk-hook-fastweights").checked = Boolean(spec.enable_fast_weights);
+    if ($("#chk-hook-assoc")) $("#chk-hook-assoc").checked = Boolean(spec.enable_associative_memory);
+  }
+
+  $("#btn-frontier-run")?.addEventListener("click", async () => {
+    const moduleId = $("#frontier-module-select")?.value || "ctm_synchrony";
+    announce(`Running capacity-matched frontier experiment: ${moduleId}...`);
+    const res = await api("/api/frontier/run", {
+      method: "POST",
+      body: JSON.stringify({ module_id: moduleId, seeds: [42, 101, 202, 303, 404] }),
+    });
+    renderFrontierResultsTable([res]);
+    $("#frontier-receipt-pre").textContent = JSON.stringify(res, null, 2);
+    announce(`Frontier experiment ${moduleId} finished: verdict=${res.verdict}, receipt=${res.receipt_sha256.slice(0, 12)}.`);
+  });
+
+  $("#btn-frontier-suite")?.addEventListener("click", async () => {
+    announce("Running multi-module capacity-matched frontier sweep...");
+    const res = await api("/api/frontier/suite", {
+      method: "POST",
+      body: JSON.stringify({ seeds: [42, 101, 202] }),
+    });
+    renderFrontierResultsTable(res.results || []);
+    $("#frontier-receipt-pre").textContent = JSON.stringify(
+      {
+        modules_executed: res.modules_executed,
+        improved_count: res.improved_count,
+        receipts: (res.results || []).map((r) => ({ module: r.module_id, verdict: r.verdict, sha256: r.receipt_sha256.slice(0, 16) })),
+      },
+      null,
+      2
+    );
+    announce(`Frontier sweep complete: ${res.improved_count} / ${res.modules_executed} modules strictly improved.`);
+  });
+
+  $("#btn-frontier-kuramoto")?.addEventListener("click", async () => {
+    const res = await api("/api/frontier/kuramoto-step", {
+      method: "POST",
+      body: JSON.stringify({ organism_id: state.selectedOrganismId, steps: 24, coupling_k: 2.8 }),
+    });
+    renderKuramotoPhaseRing(res);
+    $("#frontier-receipt-pre").textContent = JSON.stringify(res, null, 2);
+    announce(`Kuramoto synchronization updated: R(t)=${res.order_parameter_R}.`);
+  });
+
+  $("#btn-frontier-nir")?.addEventListener("click", async () => {
+    const qs = state.selectedOrganismId ? `?organism_id=${encodeURIComponent(state.selectedOrganismId)}` : "";
+    const res = await api(`/api/frontier/nir-export${qs}`, { method: "POST" });
+    $("#frontier-receipt-pre").textContent = JSON.stringify(res, null, 2);
+    announce(`Exported validated NIR v${res.validation?.nir_version} graph (${res.validation?.node_count} nodes, ${res.validation?.edge_count} edges).`);
+  });
+
+  $("#btn-frontier-hook-apply")?.addEventListener("click", async () => {
+    const res = await api("/api/frontier/hook-config", {
+      method: "POST",
+      body: JSON.stringify({
+        enabled: Boolean($("#chk-hook-enabled")?.checked),
+        enable_kuramoto: Boolean($("#chk-hook-kuramoto")?.checked),
+        enable_fast_weights: Boolean($("#chk-hook-fastweights")?.checked),
+        enable_associative_memory: Boolean($("#chk-hook-assoc")?.checked),
+      }),
+    });
+    $("#frontier-receipt-pre").textContent = JSON.stringify(res, null, 2);
+    announce(`Updated neutral frontier engine hook (active=${res.hook_status?.active}).`);
+  });
+
   async function refreshCurrentView() {
     if (state.currentView === "command") await refreshCommandCentre();
     else if (state.currentView === "connectome") await refreshConnectome();
@@ -1692,6 +1876,7 @@
     else if (state.currentView === "research") await refreshResearch();
     else if (state.currentView === "hardware") await refreshHardware();
     else if (state.currentView === "timeline") await refreshTimeline();
+    else if (state.currentView === "frontier") await refreshFrontier();
   }
 
   async function refreshAll() {

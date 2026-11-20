@@ -2,24 +2,102 @@
 
 @layer theme {
   :root {
-    color-scheme: dark;
-    --bg-midnight: #050a18;
-    --bg-deep: #091126;
-    --surface-glass: rgba(11, 18, 38, 0.82);
-    --surface-elevated: rgba(18, 28, 54, 0.92);
-    --border-subtle: rgba(110, 168, 254, 0.18);
-    --border-glow: rgba(0, 229, 255, 0.45);
-    --cyan: #00e5ff;
-    --violet: #9d6bff;
-    --amber: #ffb020;
-    --emerald: #26e3a8;
-    --rose: #ff5b84;
-    --text-primary: #eef4ff;
-    --text-muted: #93a7cb;
+    color-scheme: light dark;
+    --bg-midnight-dark: #050a18;
+    --bg-midnight-light: #f1f5f9;
+    --bg-deep-dark: #091126;
+    --bg-deep-light: #e2e8f0;
+    --surface-glass-dark: rgba(11, 18, 38, 0.82);
+    --surface-glass-light: rgba(255, 255, 255, 0.90);
+    --surface-elevated-dark: rgba(18, 28, 54, 0.92);
+    --surface-elevated-light: rgba(248, 250, 252, 0.96);
+    --border-subtle-dark: rgba(110, 168, 254, 0.18);
+    --border-subtle-light: rgba(15, 23, 42, 0.15);
+    --border-glow-dark: rgba(0, 229, 255, 0.45);
+    --border-glow-light: rgba(2, 132, 199, 0.55);
+    --cyan-dark: #00e5ff;
+    --cyan-light: #0369a1;
+    --violet-dark: #9d6bff;
+    --violet-light: #6d28d9;
+    --amber-dark: #ffb020;
+    --amber-light: #b45309;
+    --emerald-dark: #26e3a8;
+    --emerald-light: #047857;
+    --rose-dark: #ff5b84;
+    --rose-light: #be123c;
+    --text-primary-dark: #eef4ff;
+    --text-primary-light: #0f172a;
+    --text-muted-dark: #93a7cb;
+    --text-muted-light: #475569;
+    --scrollbar-track-dark: #070d1f;
+    --scrollbar-track-light: #e2e8f0;
+    --scrollbar-thumb-dark: #2b3f6b;
+    --scrollbar-thumb-light: #64748b;
+
+    /* Fallback defaults for browsers without light-dark() */
+    --bg-midnight: var(--bg-midnight-light);
+    --bg-deep: var(--bg-deep-light);
+    --surface-glass: var(--surface-glass-light);
+    --surface-elevated: var(--surface-elevated-light);
+    --border-subtle: var(--border-subtle-light);
+    --border-glow: var(--border-glow-light);
+    --cyan: var(--cyan-light);
+    --violet: var(--violet-light);
+    --amber: var(--amber-light);
+    --emerald: var(--emerald-light);
+    --rose: var(--rose-light);
+    --text-primary: var(--text-primary-light);
+    --text-muted: var(--text-muted-light);
+    --scrollbar-track: var(--scrollbar-track-light);
+    --scrollbar-thumb: var(--scrollbar-thumb-light);
+
+    @media (prefers-color-scheme: dark) {
+      --bg-midnight: var(--bg-midnight-dark);
+      --bg-deep: var(--bg-deep-dark);
+      --surface-glass: var(--surface-glass-dark);
+      --surface-elevated: var(--surface-elevated-dark);
+      --border-subtle: var(--border-subtle-dark);
+      --border-glow: var(--border-glow-dark);
+      --cyan: var(--cyan-dark);
+      --violet: var(--violet-dark);
+      --amber: var(--amber-dark);
+      --emerald: var(--emerald-dark);
+      --rose: var(--rose-dark);
+      --text-primary: var(--text-primary-dark);
+      --text-muted: var(--text-muted-dark);
+      --scrollbar-track: var(--scrollbar-track-dark);
+      --scrollbar-thumb: var(--scrollbar-thumb-dark);
+    }
+
+    @supports (color: light-dark(white, black)) {
+      --bg-midnight: light-dark(var(--bg-midnight-light), var(--bg-midnight-dark));
+      --bg-deep: light-dark(var(--bg-deep-light), var(--bg-deep-dark));
+      --surface-glass: light-dark(var(--surface-glass-light), var(--surface-glass-dark));
+      --surface-elevated: light-dark(var(--surface-elevated-light), var(--surface-elevated-dark));
+      --border-subtle: light-dark(var(--border-subtle-light), var(--border-subtle-dark));
+      --border-glow: light-dark(var(--border-glow-light), var(--border-glow-dark));
+      --cyan: light-dark(var(--cyan-light), var(--cyan-dark));
+      --violet: light-dark(var(--violet-light), var(--violet-dark));
+      --amber: light-dark(var(--amber-light), var(--amber-dark));
+      --emerald: light-dark(var(--emerald-light), var(--emerald-dark));
+      --rose: light-dark(var(--rose-light), var(--rose-dark));
+      --text-primary: light-dark(var(--text-primary-light), var(--text-primary-dark));
+      --text-muted: light-dark(var(--text-muted-light), var(--text-muted-dark));
+      --scrollbar-track: light-dark(var(--scrollbar-track-light), var(--scrollbar-track-dark));
+      --scrollbar-thumb: light-dark(var(--scrollbar-thumb-light), var(--scrollbar-thumb-dark));
+    }
+
+    &:has(> head > meta[name="color-scheme"][content="dark"]) {
+      color-scheme: dark;
+    }
+
+    &:has(> head > meta[name="color-scheme"][content="light"]) {
+      color-scheme: light;
+    }
+
     --font-sans: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
     --font-mono: "JetBrains Mono", "Cascadia Code", Consolas, monospace;
-    --scrollbar-track: #070d1f;
-    --scrollbar-thumb: #2b3f6b;
+    accent-color: var(--cyan);
     scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
     scrollbar-width: thin;
   }
@@ -66,8 +144,14 @@
   }
 
   :where(a, button, select, input, [tabindex]):focus-visible {
-    outline: 2px solid var(--cyan);
-    outline-offset: 2px;
+    outline: 3px solid var(--cyan);
+    outline-offset: 3px;
+  }
+
+  button,
+  select {
+    min-block-size: 24px;
+    min-inline-size: 24px;
   }
 
   h1 {
@@ -138,7 +222,7 @@
     justify-content: space-between;
     gap: 1rem;
     padding: 0.85rem 1.25rem;
-    background: rgba(6, 11, 26, 0.9);
+    background: var(--surface-glass);
     border-block-end: 1px solid var(--border-subtle);
     backdrop-filter: blur(12px);
   }
@@ -325,7 +409,7 @@
     padding: 0.3rem 0.65rem;
     border-radius: 6px;
     border: 1px solid var(--border-subtle);
-    background: #0a132c;
+    background: var(--surface-elevated);
     color: var(--text-primary);
     font-family: var(--font-mono);
     font-size: 0.78rem;
@@ -523,7 +607,7 @@
     position: sticky;
     inset-block-start: 0;
     z-index: 2;
-    background: #0d1836;
+    background: var(--surface-elevated);
     color: var(--cyan);
     text-align: start;
     padding: 0.55rem 0.6rem;
@@ -533,13 +617,13 @@
   tbody th,
   tbody td {
     padding: 0.48rem 0.6rem;
-    border-block-end: 1px solid rgba(255, 255, 255, 0.06);
+    border-block-end: 1px solid var(--border-subtle);
   }
 
   tbody th {
     position: sticky;
     inset-inline-start: 0;
-    background: #0a1228;
+    background: var(--surface-elevated);
     text-align: start;
     font-weight: 600;
   }
@@ -578,7 +662,7 @@
     padding: 0.3rem 0.65rem;
     border-radius: 6px;
     border: 1px solid var(--border-subtle);
-    background: #0a132c;
+    background: var(--surface-elevated);
     color: var(--text-primary);
     font-family: var(--font-mono);
     font-size: 0.76rem;
@@ -663,8 +747,8 @@
   }
 
   .compact-select {
-    background: rgba(12, 22, 38, 0.9);
-    color: var(--text-main, #e2e8f0);
+    background: var(--surface-elevated);
+    color: var(--text-primary);
     border: 1px solid var(--border-subtle);
     border-radius: 8px;
     padding: 0.3rem 0.5rem;
@@ -777,14 +861,39 @@
   }
 
   .compact-input {
-    background: rgba(12, 22, 38, 0.9);
-    color: var(--text-main, #e2e8f0);
+    background: var(--surface-elevated);
+    color: var(--text-primary);
     border: 1px solid var(--border-subtle);
     border-radius: 8px;
     padding: 0.32rem 0.6rem;
     font-family: var(--font-mono);
     font-size: 0.75rem;
     min-inline-size: 185px;
+  }
+
+  .hook-controls {
+    margin-block-start: 0.65rem;
+  }
+
+  /* Two-state dark/light theme toggle text branching via CSS (zero-JS safe) */
+  .theme-toggle-btn .theme-opt-light { display: none; }
+  .theme-toggle-btn .theme-opt-dark { display: inline; }
+
+  @media (prefers-color-scheme: dark) {
+    .theme-toggle-btn .theme-opt-light { display: inline; }
+    .theme-toggle-btn .theme-opt-dark { display: none; }
+  }
+
+  :root:has(> head > meta[name="color-scheme"][content="dark"]) .theme-toggle-btn .theme-opt-light { display: inline; }
+  :root:has(> head > meta[name="color-scheme"][content="dark"]) .theme-toggle-btn .theme-opt-dark { display: none; }
+  :root:has(> head > meta[name="color-scheme"][content="light"]) .theme-toggle-btn .theme-opt-light { display: none; }
+  :root:has(> head > meta[name="color-scheme"][content="light"]) .theme-toggle-btn .theme-opt-dark { display: inline; }
+
+  /* Keep canvas plots dark-instrumented across themes for crisp signal contrast */
+  #connectome-3d-container,
+  #world-canvas,
+  #frontier-phase-canvas {
+    background: #060c16;
   }
 
   @media (prefers-reduced-motion: no-preference) {

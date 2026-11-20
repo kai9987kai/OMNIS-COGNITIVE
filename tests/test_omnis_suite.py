@@ -28,6 +28,31 @@ from observatory.api import create_observatory_app
 from sonapse.connectome import Neuron, SonapseConnectome, activate_neuron
 from sonapse.topology import analyze_topology
 from supermix_aether.router import SpecialistModel, SupermixAether
+import numpy as np
+
+from frontier import (
+    CapacityMatchedHarness,
+    FrontierExtensionHook,
+    FrontierSpec,
+    build_frontier_registry,
+)
+from frontier.analysis import ConnectivityAnalyzer, TopKSparseDictionary, run_causal_emergence_benchmark
+from frontier.biophysics import HodgkinHuxleyCable, export_connectome_to_nir, validate_nir_graph
+from frontier.memory_systems import (
+    BTSPBinaryMemory,
+    ContinuumMemorySystem,
+    FastWeightsController,
+    ModernHopfieldAssociativeMemory,
+)
+from frontier.methodology import (
+    AnytimeValidTester,
+    DecisionSensitiveSelector,
+    VerifierGatedQDSearch,
+    run_faultline_ensemble_benchmark,
+)
+from frontier.models import ActiveDendriticLayer, TinyRecursiveModel, _generate_4x4_sudoku_pair
+from frontier.optimizers import MuonOptimizer, RigLSparseTrainer, newton_schulz_orthogonalize
+from frontier.temporal import ContinuousThoughtMachine, KuramotoOscillatorBank
 
 
 # 1. Neuron activation correctness
@@ -877,4 +902,196 @@ def test_27_crosswire_tessera_counterform_molt_cablelab_and_trophic_ecology() ->
         assert client.post("/api/morpheus/molt-assay").status_code == 200
     finally:
         omnis.shutdown()
+
+
+# 28. Frontier Research Pack, Capacity-Matched Control Harness, and NIR Export
+def test_28_frontier_research_pack_capacity_matched_harness_and_nir_export() -> None:
+    # 1. FrontierSpec specification contract & type safety
+    spec = FrontierSpec()
+    assert spec.enabled is False
+    assert spec.any_active() is False
+    spec_dict = spec.to_dict()
+    assert "enabled" in spec_dict and "seed" in spec_dict
+
+    with pytest.raises(TypeError, match="Unknown FrontierSpec fields"):
+        FrontierSpec.from_dict({"unrecognized_frontier_field": 999})
+
+    # 2. FrontierExtensionHook default-off neutrality & observer registration
+    hook = FrontierExtensionHook(spec)
+    assert hook.on_step({"tick": 0, "lead": None}) is None  # zero overhead when disabled
+    cfg = hook.configure({"enabled": True, "enable_kuramoto": True})
+    assert cfg["enabled"] is True
+    assert hook.spec.any_active() is True
+    hook_status = hook.get_status()
+    assert hook_status["active"] is True
+
+    # 3. Temporal: Kuramoto coupled oscillators & Continuous Thought Machine
+    kb = KuramotoOscillatorBank(num_oscillators=8, seed=42)
+    m = kb.step(steps=3)
+    assert 0.0 <= m["order_parameter_R"] <= 1.0
+    assert "phase_locking_index" in m
+
+    ctm = ContinuousThoughtMachine(input_dim=4, hidden_dim=6, output_dim=2, thought_ticks=3, seed=42)
+    s_feat = ctm.synchrony_features(np.ones(4))
+    assert len(s_feat) == 21
+    out_ctm = ctm.forward(np.ones(4))
+    assert len(out_ctm) == 2
+
+    # 4. Memory: Continuum Memory, One-Shot BTSP, Modern Hopfield & Fast Weights
+    cms = ContinuumMemorySystem(dim=6, out_dim=2, seed=42)
+    err = cms.update(np.ones(6), np.ones(2))
+    assert isinstance(err, float)
+
+    btsp = BTSPBinaryMemory(n_in=16, n_out=16, seed=42)
+    btsp.imprint_one_shot(np.ones(16), np.ones(16))
+    assert np.sum(btsp.recall(np.ones(16))) > 0
+
+    mhop = ModernHopfieldAssociativeMemory(dim=8, beta=4.0)
+    mhop.store(np.array([1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]))
+    ret = mhop.retrieve(np.array([0.9, 0.1, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]))
+    assert ret[0] > ret[1]
+
+    fw = FastWeightsController(dim=8)
+    fw.bind(np.ones(8), np.ones(8))
+    assert np.linalg.norm(fw.a_mat) > 0.0
+
+    # 5. Models: Tiny Recursive Model on 4x4 Sudoku & Active Dendritic Layer
+    puzz, sol = _generate_4x4_sudoku_pair(np.random.default_rng(42))
+    trm = TinyRecursiveModel(latent_dim=8, recursion_steps=2, seed=42)
+    solved = trm.solve(puzz)
+    assert solved.shape == (4, 4)
+
+    dend = ActiveDendriticLayer(input_dim=4, context_dim=3, num_units=4, branches=2, seed=42)
+    out_val, h_val, gate_val = dend.forward(np.ones(4), np.ones(3))
+    assert isinstance(out_val, float)
+    loss = dend.train_step(np.ones(4), np.ones(3), target=1.0)
+    assert isinstance(loss, float)
+
+    # 6. Optimizers: Muon Newton-Schulz momentum & RigL dynamic sparse training
+    g = np.random.randn(4, 6)
+    orth = newton_schulz_orthogonalize(g, steps=3)
+    assert orth.shape == (4, 6)
+    muon = MuonOptimizer(shape=(4, 6))
+    w_new = muon.step(np.zeros((4, 6)), g)
+    assert w_new.shape == (4, 6)
+
+    rigl = RigLSparseTrainer(shape=(4, 6), sparsity=0.67, seed=42)
+    x_in = np.random.randn(10, 6)
+    y_tgt = np.random.randn(10, 4)
+    mse_rigl = rigl.train(x_in, y_tgt, epochs=5)
+    assert isinstance(mse_rigl, float)
+    assert np.sum(rigl.mask) <= 10
+
+    # 7. Analysis & Methodology: TopK SAE, Connectivity, Anytime-Valid E-Values, EVSI, QD Search
+    sae = TopKSparseDictionary(input_dim=6, dict_size=12, k_active=2, seed=42)
+    z = sae.encode_topk(np.ones(6))
+    assert np.count_nonzero(z) <= 2
+
+    conn = SonapseConnectome(input_dim=4, hidden_dim=4, output_dim=2, seed=42)
+    node_ids, traces = ConnectivityAnalyzer.record_connectome_traces(conn, steps=10, seed=42)
+    conn_stats = ConnectivityAnalyzer.analyze(node_ids, traces)
+    assert "mean_fc" in conn_stats and "mean_ec" in conn_stats
+
+    tester = AnytimeValidTester(alpha=0.05, sigma=1.0)
+    res_test = tester.test_stream([0.5, 0.8, 1.2])
+    assert "final_e_value" in res_test
+    assert res_test["threshold"] == 20.0
+
+    selector = DecisionSensitiveSelector()
+    scored = selector.score_candidates([{"prior_std": 0.8, "compute_cost": 1.0, "decision_stake": 2.0}])
+    assert scored[0]["evsi_score"] > 0
+
+    fault = run_faultline_ensemble_benchmark([42, 101])
+    assert "verdict" in fault and "receipt_sha256" in fault
+
+    qd = VerifierGatedQDSearch(grid_bins=2, seed=42)
+    qd_res = qd.search(budget=4)
+    assert "coverage" in qd_res
+
+    # 8. Biophysics: Hodgkin-Huxley cable simulation & NIR neuromorphic export
+    hh = HodgkinHuxleyCable(compartments=4, dt_ms=0.05)
+    sim = hh.simulate(duration_ms=4.0, inject_current_uA=20.0)
+    assert "propagation_fraction" in sim
+
+    nir_graph = export_connectome_to_nir(conn)
+    val = validate_nir_graph(nir_graph)
+    assert val["valid"] is True
+    assert val["nir_version"] == "0.4.0"
+
+    # 9. Complete Frontier Module Registry (all 19 modules verified)
+    reg = build_frontier_registry()
+    assert len(reg) == 19
+    expected_modules = {
+        "ctm_synchrony",
+        "kuramoto_binding",
+        "continuum_memory",
+        "btsp_binary_memory",
+        "associative_memory",
+        "fast_weights",
+        "tiny_recursive_model",
+        "dendritic_layer",
+        "muon_optimizer",
+        "rigl_sparse_training",
+        "topk_sparse_dictionary",
+        "functional_effective_connectivity",
+        "causal_emergence_audit",
+        "anytime_valid_statistics",
+        "decision_sensitive_selection",
+        "faultline_joint_failure",
+        "verifier_gated_qd_search",
+        "hodgkin_huxley_cable",
+        "nir_interchange_export",
+    }
+    assert set(reg.keys()) == expected_modules
+
+    # Capacity-matched evaluation receipt verification
+    r_kur = reg["kuramoto_binding"].runner([42, 101, 202, 303, 404])
+    assert r_kur["verdict"] == "improved"
+    assert len(r_kur["receipt_sha256"]) == 64
+    assert r_kur["vs_baseline"]["ci_excludes_zero"] is True
+
+    # 10. Live OmnisCore Hook Integration & Observatory API Endpoints
+    omnis = OmnisCore(SystemConfig(database_path=":memory:"))
+    try:
+        assert hasattr(omnis, "frontier_hook")
+        assert hasattr(omnis, "frontier_registry")
+        omnis.step(steps=2)
+        assert len(omnis.frontier_hook.telemetry_history) == 0  # Default-off neutrality
+
+        omnis.frontier_hook.configure({"enabled": True, "enable_kuramoto": True})
+        omnis.step(steps=2)
+        assert len(omnis.frontier_hook.telemetry_history) > 0  # Active observer telemetry
+
+        client = TestClient(create_observatory_app(omnis))
+        r_reg = client.get("/api/frontier/registry")
+        assert r_reg.status_code == 200
+        assert r_reg.json()["count"] == 19
+
+        r_run = client.post("/api/frontier/run", json={"module_id": "kuramoto_binding", "seeds": [42, 101]})
+        assert r_run.status_code == 200
+        assert "receipt_sha256" in r_run.json()
+
+        assert client.post("/api/frontier/run", json={"module_id": "nonexistent"}).status_code == 404
+
+        r_suite = client.post(
+            "/api/frontier/suite",
+            json={"module_ids": ["kuramoto_binding", "nir_interchange_export"], "seeds": [42, 101]},
+        )
+        assert r_suite.status_code == 200
+        assert r_suite.json()["modules_executed"] == 2
+
+        r_nir = client.post("/api/frontier/nir-export")
+        assert r_nir.status_code == 200
+        assert r_nir.json()["validation"]["valid"] is True
+
+        r_km = client.post("/api/frontier/kuramoto-step", json={"coupling_k": 2.5, "steps": 2})
+        assert r_km.status_code == 200
+        assert "order_parameter_R" in r_km.json()
+
+        r_cfg = client.post("/api/frontier/hook-config", json={"enabled": True, "enable_kuramoto": True})
+        assert r_cfg.status_code == 200
+        assert r_cfg.json()["spec"]["enabled"] is True
+    finally:
+        omnis.shutdown()
+
 

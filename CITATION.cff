@@ -1,0 +1,20 @@
+cff-version: 1.2.0
+message: "If you use OMNIS or its Frontier Research Pack in academic or engineering work, please cite it using this metadata."
+title: "OMNIS: Unified Artificial Intelligence, Adaptive Connectome, Memory Archaeology & Artificial Life Research Platform"
+version: "1.1.0"
+date-released: "2026-11-20"
+license: MIT
+repository-code: "https://github.com/kai9987kai/OMNIS-COGNITIVE"
+authors:
+  - alias: "kai9987kai"
+    family-names: "Piper"
+    given-names: "Kai"
+keywords:
+  - computational-neuroscience
+  - adaptive-connectome
+  - synaptic-plasticity
+  - artificial-life
+  - continual-learning
+  - active-inference
+  - neuromorphic-computing
+  - quality-diversity
